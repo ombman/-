@@ -24,8 +24,7 @@
     "★要確認（実在情報と食い違う指示があった箇所。実画面で確認してください）:",
     "  1) 沿線3の終駅: ご指示は『香露園』でしたが、阪神本線の実在駅は『香櫨園(こうろえん)』。",
     "     香櫨園 を主候補、香露園 を予備候補にしています。違えば targets を修正。",
-    "  2) 沿線3の行選択: ご指示は『た業(た行)から阪神本線』ですが、阪神=は行の可能性が高い。",
-    "     た行を主にしつつ verify で阪神本線の出現を確認します。失敗時は『た行』を『は行』へ。"
+    "  2) 沿線3の行選択: 阪神本線＝『は行』でユーザー確定済み。verify で阪神本線の出現も確認します。"
   ],
 
   "steps": [
@@ -138,11 +137,11 @@
       "targets": [ { "by": "role", "value": "兵庫県", "options": { "role": "button" } }, { "by": "text", "value": "兵庫県" } ] },
     { "id": "ensen3_next_1", "description": "「次へ」をクリック", "action": "click",
       "targets": [ { "by": "role", "value": "次へ", "options": { "role": "button" } }, { "by": "text", "value": "次へ" } ] },
-    { "id": "ensen3_ta_row",
-      "description": "「た行」を選択（※阪神本線は『は行』の可能性あり。verifyで確認）",
+    { "id": "ensen3_ha_row",
+      "description": "「は行」を選択（阪神本線＝『は』。ユーザー確定）",
       "action": "click",
-      "targets": [ { "by": "text", "value": "た行" }, { "by": "text", "value": "た" } ],
-      "note": "verifyで阪神本線が見つからなければ、targetsの『た行』を『は行』に変更してください。",
+      "targets": [ { "by": "text", "value": "は行" }, { "by": "text", "value": "は" } ],
+      "note": "verifyで阪神本線が見つからなければ、実画面の行表記を inspect.py で確認して調整してください。",
       "verify": { "contains": "阪神本線" } },
     { "id": "ensen3_hanshin", "description": "「阪神本線」を選択", "action": "click",
       "targets": [ { "by": "text", "value": "阪神本線" } ] },
