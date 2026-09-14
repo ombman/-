@@ -1,0 +1,9 @@
+{
+  "login_url": "",
+  "browser_channel": "chrome",
+  "headless": false,
+  "slow_mo_ms": 300,
+  "default_timeout_ms": 15000,
+  "credential_service": "reins-auto-search",
+  "step_by_step_pause": false
+}

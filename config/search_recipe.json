@@ -1,0 +1,232 @@
+{
+  "_readme": [
+    "このファイルは『売買物件検索』の自動操作手順です。プログラムを書き換えずに、",
+    "ここ（JSON）を編集するだけで手順や特定条件を調整できます。",
+    "",
+    "各ステップの意味:",
+    "  id                : ステップの識別名（スクショのファイル名にも使われます）",
+    "  description       : 何をするかの説明（ログに出ます）",
+    "  action            : 操作の種類。click / fill / select / check / scroll /",
+    "                      wait_for / wait_ms / verify / screenshot",
+    "  targets           : 対象の特定候補。上から順に試し、最初に見つかったものを使います。",
+    "                      by = label / role / text / placeholder / name / id / css / xpath",
+    "  value             : fill(入力) や select(選択) で使う値",
+    "  verify            : 操作後の確認条件（contains / visible_targets / not_contains）",
+    "  scroll_into_view  : true にすると対象が画面内に来るまでスクロールします",
+    "  coordinate_fallback : [x, y]。HTMLで特定できない時だけ使う座標（補助手段）",
+    "",
+    "★重要: REINSの実際のHTML要素名（id/name）は環境で異なる可能性があります。",
+    "  まず『見える日本語ラベル・ボタン名(by=text / label / role)』が当たりやすいです。",
+    "  当たらない場合は logs/shots の画像を見ながら targets を足す/直してください。",
+    "  『tools/inspect.py』を使うと、実際の画面で要素名を調べられます。",
+    "",
+    "★沿線2以降の手順はご指示が途中まででした。同じ書き方で steps に追記すれば拡張できます。",
+    "  末尾に『TODO』ステップの雛形を用意してあります。"
+  ],
+
+  "steps": [
+    {
+      "id": "open_baibai_search",
+      "description": "「売買物件検索」を探してクリックする",
+      "action": "click",
+      "targets": [
+        { "by": "role", "value": "売買物件検索", "options": { "role": "link" } },
+        { "by": "text", "value": "売買物件検索" }
+      ],
+      "verify": { "contains": "物件種別" }
+    },
+
+    {
+      "id": "select_bukken_shubetsu1_baimansion",
+      "description": "「物件種別1」から「売マンション」を選択する",
+      "action": "select",
+      "value": "売マンション",
+      "targets": [
+        { "by": "label", "value": "物件種別1" },
+        { "by": "name", "value": "bukkenShubetsu1" },
+        { "by": "css", "value": "select[name*='shubetsu']" }
+      ],
+      "note": "select要素でない場合（チェックボックス/リンク選択）は action を click に変え、targets に by:text value:'売マンション' を使ってください。",
+      "verify": { "contains": "売マンション" }
+    },
+
+    {
+      "id": "scroll_to_ensen1",
+      "description": "「沿線1」まで下方向にスクロールする",
+      "action": "scroll",
+      "value": 700
+    },
+    {
+      "id": "ensen1_open_guide",
+      "description": "「沿線1」の「入力ガイド」をクリックする",
+      "action": "click",
+      "scroll_into_view": true,
+      "targets": [
+        { "by": "css", "value": "text=入力ガイド >> nth=0" },
+        { "by": "text", "value": "入力ガイド" }
+      ],
+      "note": "画面に『入力ガイド』が複数ある場合、沿線1は先頭(nth=0)です。ずれる場合は nth の数字を調整。",
+      "verify": { "contains": "近畿圏" }
+    },
+    {
+      "id": "ensen1_select_kinki",
+      "description": "入力ガイドで「近畿圏」を選択する",
+      "action": "click",
+      "targets": [
+        { "by": "role", "value": "近畿圏", "options": { "role": "button" } },
+        { "by": "text", "value": "近畿圏" }
+      ]
+    },
+    {
+      "id": "ensen1_select_hyogo",
+      "description": "「兵庫県」を選択する",
+      "action": "click",
+      "targets": [
+        { "by": "role", "value": "兵庫県", "options": { "role": "button" } },
+        { "by": "text", "value": "兵庫県" }
+      ]
+    },
+    {
+      "id": "ensen1_next_1",
+      "description": "「次へ」をクリックする",
+      "action": "click",
+      "targets": [
+        { "by": "role", "value": "次へ", "options": { "role": "button" } },
+        { "by": "text", "value": "次へ" }
+      ]
+    },
+    {
+      "id": "ensen1_select_ta_row",
+      "description": "「た行」を探してクリックする（ご指示の「た業」は五十音の『た行』と解釈）",
+      "action": "click",
+      "targets": [
+        { "by": "text", "value": "た行" },
+        { "by": "text", "value": "た" }
+      ],
+      "note": "REINSの表記が『た行』か単に『た』かは画面で確認してください。東海道線は『と』＝た行に含まれます。"
+    },
+    {
+      "id": "ensen1_select_tokaido",
+      "description": "「東海道線」を選択する",
+      "action": "click",
+      "targets": [
+        { "by": "text", "value": "東海道線" }
+      ]
+    },
+    {
+      "id": "ensen1_next_2",
+      "description": "「次へ」をクリックする",
+      "action": "click",
+      "targets": [
+        { "by": "role", "value": "次へ", "options": { "role": "button" } },
+        { "by": "text", "value": "次へ" }
+      ],
+      "verify": { "contains": "甲子園口" }
+    },
+    {
+      "id": "ensen1_start_station",
+      "description": "始駅として「甲子園口」を選択する",
+      "action": "select",
+      "value": "甲子園口",
+      "targets": [
+        { "by": "label", "value": "始駅" },
+        { "by": "name", "value": "startStation" }
+      ],
+      "note": "始駅がプルダウンでなくクリック選択の場合は action:click, targets:[{by:text,value:甲子園口}] に変更。",
+      "coordinate_fallback": null
+    },
+    {
+      "id": "ensen1_end_station",
+      "description": "終駅として「さくら夙川」を選択する",
+      "action": "select",
+      "value": "さくら夙川",
+      "targets": [
+        { "by": "label", "value": "終駅" },
+        { "by": "name", "value": "endStation" }
+      ],
+      "note": "終駅がクリック選択の場合は action:click, targets:[{by:text,value:さくら夙川}] に変更。"
+    },
+    {
+      "id": "ensen1_decide",
+      "description": "「決定」をクリックする",
+      "action": "click",
+      "targets": [
+        { "by": "role", "value": "決定", "options": { "role": "button" } },
+        { "by": "text", "value": "決定" }
+      ]
+    },
+    {
+      "id": "ensen1_verify_reflected",
+      "description": "沿線1の駅条件（東海道線・甲子園口〜さくら夙川）が検索画面に反映されたことを確認する",
+      "action": "verify",
+      "verify": { "contains": "東海道線" }
+    },
+    {
+      "id": "ensen1_walk_minutes",
+      "description": "「駅から徒歩」の入力欄に 10 と入力する",
+      "action": "fill",
+      "value": "10",
+      "targets": [
+        { "by": "label", "value": "駅から徒歩" },
+        { "by": "name", "value": "walkMinutes1" },
+        { "by": "css", "value": "input[name*='walk']" }
+      ]
+    },
+    {
+      "id": "ensen1_walk_unit",
+      "description": "駅から徒歩の単位で「分」を選択する",
+      "action": "select",
+      "value": "分",
+      "targets": [
+        { "by": "label", "value": "単位" },
+        { "by": "name", "value": "walkUnit1" }
+      ],
+      "note": "単位が固定表示（選択不要）の場合はこのステップを削除してよいです。"
+    },
+
+    {
+      "id": "scroll_to_ensen2",
+      "description": "「沿線2」まで下方向にスクロールする",
+      "action": "scroll",
+      "value": 500
+    },
+    {
+      "id": "ensen2_open_guide",
+      "description": "「沿線2」の「入力ガイド」をクリックする",
+      "action": "click",
+      "scroll_into_view": true,
+      "targets": [
+        { "by": "css", "value": "text=入力ガイド >> nth=1" },
+        { "by": "text", "value": "入力ガイド" }
+      ],
+      "note": "沿線2は2番目の入力ガイド(nth=1)を想定。ずれる場合は数字を調整。",
+      "verify": { "contains": "近畿圏" }
+    },
+    {
+      "id": "ensen2_select_kinki",
+      "description": "入力ガイドで「近畿圏」を選択する",
+      "action": "click",
+      "targets": [
+        { "by": "role", "value": "近畿圏", "options": { "role": "button" } },
+        { "by": "text", "value": "近畿圏" }
+      ]
+    },
+
+    {
+      "id": "TODO_ensen2_and_beyond",
+      "description": "【要追記】沿線2の続き（県・路線・駅・徒歩分数など）と、検索実行〜図面の一括取得までの手順",
+      "action": "screenshot",
+      "note": [
+        "ここから先はご指示が途中で途切れていたため未確定です。",
+        "上のステップと同じ書き方で、以下のような流れを steps に追記してください:",
+        "  1) 沿線2の 県 → 路線 → 始駅/終駅 → 決定 → 徒歩分数/単位",
+        "  2) その他の検索条件（価格・面積など）があれば追加",
+        "  3) 『検索』ボタンをクリック（例: {action:click, targets:[{by:text,value:検索}]}）",
+        "  4) 検索結果が出たことを確認（例: {action:verify, verify:{contains:件}}）",
+        "  5) 『図面の一括取得』をクリック（例: {action:click, targets:[{by:text,value:図面の一括取得}]}）",
+        "  6) ダウンロード完了を確認",
+        "実際の画面のボタン名・ラベルは tools/inspect.py で調べると確実です。"
+      ]
+    }
+  ]
+}

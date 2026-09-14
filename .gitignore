@@ -1,0 +1,9 @@
+# 実行環境・自動生成物（リポジトリに含めない）
+.venv/
+.chrome-profile/
+logs/
+__pycache__/
+*.pyc
+
+# 個人設定（URLや動作設定）。雛形の settings.example.json のみ共有します。
+config/settings.json

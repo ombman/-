@@ -1,0 +1,88 @@
+"""
+browser.py
+==========
+Google Chrome を Playwright 経由で起動・終了するモジュールです。
+
+ポイント:
+    - browser_channel="chrome" にすると、パソコンにインストール済みの
+      Google Chrome をそのまま自動操作します（要件どおり Chrome を使用）。
+    - ログイン状態などを保つため「永続コンテキスト（user-data-dir）」を使い、
+      毎回まっさらではなく前回のセッションを引き継げるようにします。
+    - headless=False（画面を表示）にして、初心者でも動きを目で追えるようにします。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+from app_logger import get_logger
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+# Chromeのプロファイル(セッション)保存先。ログインCookie等がここに残ります。
+USER_DATA_DIR = ROOT_DIR / ".chrome-profile"
+
+
+class BrowserSession:
+    """
+    with 文で使えるブラウザセッション。
+
+        with BrowserSession(settings) as page:
+            page.goto(...)
+    """
+
+    def __init__(self, settings: dict):
+        self.settings = settings
+        self._pw = None
+        self._context = None
+        self.page = None
+
+    def __enter__(self):
+        log = get_logger()
+        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        self._pw = sync_playwright().start()
+        channel = self.settings.get("browser_channel", "chrome")
+        headless = bool(self.settings.get("headless", False))
+        slow_mo = int(self.settings.get("slow_mo_ms", 300))
+
+        log.info("Google Chrome を起動します（channel=%s, headless=%s）", channel, headless)
+
+        launch_kwargs = dict(
+            user_data_dir=str(USER_DATA_DIR),
+            headless=headless,
+            slow_mo=slow_mo,
+            args=["--start-maximized"],
+            no_viewport=True,  # ウィンドウサイズに追従
+        )
+
+        try:
+            self._context = self._pw.chromium.launch_persistent_context(
+                channel=channel, **launch_kwargs
+            )
+        except Exception as exc:
+            # Google Chrome が見つからない等の場合は Playwright 同梱の Chromium で代替
+            log.warning(
+                "channel=%s での起動に失敗したため、Playwright同梱のChromiumで再試行します: %s",
+                channel, exc,
+            )
+            self._context = self._pw.chromium.launch_persistent_context(**launch_kwargs)
+
+        self._context.set_default_timeout(int(self.settings.get("default_timeout_ms", 15000)))
+
+        # 既に開いているタブがあれば使い、無ければ新規に開く
+        self.page = self._context.pages[0] if self._context.pages else self._context.new_page()
+        return self.page
+
+    def __exit__(self, exc_type, exc, tb):
+        log = get_logger()
+        try:
+            if self._context is not None:
+                self._context.close()
+        finally:
+            if self._pw is not None:
+                self._pw.stop()
+        log.info("ブラウザを終了しました。")
+        # 例外は握りつぶさず呼び出し側へ伝える
+        return False
