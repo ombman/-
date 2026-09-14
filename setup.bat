@@ -26,9 +26,26 @@ echo   Using Python command: %PYCMD%
 
 echo.
 echo [2/4] Creating a private environment (.venv)...
+rem 壊れかけ（python.exeが無い）の .venv が残っていたら削除してから作り直す
+if exist ".venv" if not exist ".venv\Scripts\python.exe" (
+    echo   Removing an incomplete .venv folder...
+    rmdir /s /q ".venv"
+)
 %PYCMD% -m venv .venv
 if errorlevel 1 (
+    echo.
     echo [ERROR] Failed to create the virtual environment.
+    echo -------------------------------------------------------
+    echo  よくある原因:
+    echo   1) ディスクの空き容量が不足している
+    echo      （古い重複フォルダやZIPを削除して空きを増やしてください）
+    echo   2) フォルダの場所が深すぎる / パスが長すぎる
+    echo      （C:\reins など短い場所に置いてください）
+    echo   3) このフォルダに書き込み権限がない
+    echo -------------------------------------------------------
+    echo  空き容量の目安を表示します:
+    dir /-c "%~d0\" | find "bytes free"
+    echo.
     pause
     exit /b 1
 )
