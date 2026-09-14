@@ -98,6 +98,8 @@ def _run_step(page, step: dict[str, Any], default_timeout: int) -> None:
         fill_target(page, targets, value, timeout_ms)
     elif action == "select":
         select_target(page, targets, value, timeout_ms)
+    elif action == "choose":
+        _choose(page, targets, value, timeout_ms)
     elif action == "check":
         check_target(page, targets, timeout_ms)
     elif action == "scroll":
@@ -118,6 +120,30 @@ def _run_step(page, step: dict[str, Any], default_timeout: int) -> None:
     if verify and action != "verify":
         _check_verify(page, verify, timeout_ms)
         log.info("  ✓ 操作結果を確認しました。")
+
+
+def _choose(page, targets, value, timeout_ms) -> None:
+    """
+    「ドロップダウン(select)でも、クリック式のリストでも選べる」万能選択。
+
+    REINSの入力ガイド内の始駅/終駅などは、実際にプルダウンかリストクリックか
+    画面次第で分かりません。そこで:
+        1) まず対象を <select> とみなして項目を選ぶ
+        2) 失敗したら、その値の文字（例:「西宮北口」）をクリックして選ぶ
+    の順に試します。
+    """
+    log = get_logger()
+    # 1) select として試す
+    try:
+        select_target(page, targets, value, timeout_ms)
+        return
+    except Exception:
+        log.debug("  ・select として選べず、クリック式として再試行します: %r", value)
+
+    # 2) クリック式リストとして試す（値の文字をクリック）
+    click_targets = [{"by": "text", "value": str(value), "options": {"exact": True}},
+                     {"by": "text", "value": str(value)}]
+    click_target(page, click_targets, timeout_ms)
 
 
 def _scroll_into_view(page, targets, timeout_ms) -> None:

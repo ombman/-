@@ -22,6 +22,8 @@ from app_logger import get_logger
 ROOT_DIR = Path(__file__).resolve().parent.parent
 # Chromeのプロファイル(セッション)保存先。ログインCookie等がここに残ります。
 USER_DATA_DIR = ROOT_DIR / ".chrome-profile"
+# 図面などダウンロードファイルの保存先。
+DOWNLOAD_DIR = ROOT_DIR / "downloads"
 
 
 class BrowserSession:
@@ -41,6 +43,7 @@ class BrowserSession:
     def __enter__(self):
         log = get_logger()
         USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
         self._pw = sync_playwright().start()
         channel = self.settings.get("browser_channel", "chrome")
@@ -54,7 +57,9 @@ class BrowserSession:
             headless=headless,
             slow_mo=slow_mo,
             args=["--start-maximized"],
-            no_viewport=True,  # ウィンドウサイズに追従
+            no_viewport=True,          # ウィンドウサイズに追従
+            accept_downloads=True,      # 図面などのダウンロードを許可
+            downloads_path=str(DOWNLOAD_DIR),  # ダウンロード保存先
         )
 
         try:
