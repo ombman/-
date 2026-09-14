@@ -39,24 +39,28 @@ class LoginError(Exception):
 # --- 要素の特定候補（上から順に試す） -------------------------------------
 
 # ログインID入力欄
+# ※重要: REINSのログイン画面には「IDを記憶する」等のチェックボックスがあり、
+#   単純に label="ID" で探すとチェックボックスを掴んでしまう。
+#   そこで「文字入力できる欄(role=textbox / type=text等)」に限定して掴む。
 ID_TARGETS = [
-    {"by": "label", "value": "ID"},
-    {"by": "label", "value": "ユーザーID"},
-    {"by": "label", "value": "会員専用ID"},
+    # 文字入力欄(textbox)だけを対象にする。チェックボックスやパスワードは除外される。
+    {"by": "role", "value": "", "options": {"role": "textbox"}},
+    # チェックボックス/ラジオ/パスワード/隠し要素/ボタンを除いた入力欄
+    {"by": "css", "value": "input:not([type='checkbox']):not([type='radio']):not([type='password']):not([type='hidden']):not([type='submit']):not([type='button'])"},
     {"by": "placeholder", "value": "ID"},
+    {"by": "label", "value": "ID", "options": {"exact": True}},
     {"by": "name", "value": "userId"},
     {"by": "name", "value": "loginId"},
-    {"by": "name", "value": "id"},
-    {"by": "css", "value": "input[type='text']"},
+    {"by": "name", "value": "username"},
 ]
 
-# パスワード入力欄
+# パスワード入力欄（type=password は一意なので最優先で確実に掴める）
 PW_TARGETS = [
-    {"by": "label", "value": "パスワード"},
+    {"by": "css", "value": "input[type='password']"},
+    {"by": "label", "value": "パスワード", "options": {"exact": True}},
     {"by": "placeholder", "value": "パスワード"},
     {"by": "name", "value": "password"},
     {"by": "name", "value": "passwd"},
-    {"by": "css", "value": "input[type='password']"},
 ]
 
 # 「規程及びガイドラインを遵守します」チェックボックス

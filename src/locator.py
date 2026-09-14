@@ -48,7 +48,11 @@ def _build_locator(page, by: str, value: str, options: dict[str, Any] | None = N
     if by == "label":
         return page.get_by_label(value, exact=exact)
     if by == "role":
-        return page.get_by_role(role_name, name=value, exact=exact)
+        # value が空のときは「名前で絞らず、その役割の要素」を対象にする。
+        # 例: role=textbox（文字入力欄）を名前指定なしで掴む。
+        if value:
+            return page.get_by_role(role_name, name=value, exact=exact)
+        return page.get_by_role(role_name)
     if by == "text":
         return page.get_by_text(value, exact=exact)
     if by == "placeholder":
