@@ -119,7 +119,7 @@ def _run_step(page, step: dict[str, Any], default_timeout: int) -> None:
     verify = step.get("verify")
     if verify and action != "verify":
         _check_verify(page, verify, timeout_ms)
-        log.info("  ✓ 操作結果を確認しました。")
+        log.info("  [OK] 操作結果を確認しました。")
 
 
 def _choose(page, targets, value, timeout_ms) -> None:
