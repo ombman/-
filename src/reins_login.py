@@ -68,7 +68,15 @@ COMPLIANCE_TARGETS = [
     {"by": "label", "value": "所属機構の規程及びガイドラインを遵守します"},
     {"by": "label", "value": "規程及びガイドラインを遵守します"},
     {"by": "text", "value": "規程及びガイドラインを遵守します"},
-    {"by": "css", "value": "input[type='checkbox']"},
+]
+
+# 「ユーザID・パスワードを保存する」チェックボックス
+# ※REINSではこの2つ（規程遵守＋保存する）に☑がないとログインへ進めない。
+#   ラベル文字は部分一致で拾う（表記ゆれに強くするため）。
+SAVE_CREDS_TARGETS = [
+    {"by": "label", "value": "ユーザID・パスワードを保存する"},
+    {"by": "label", "value": "パスワードを保存する"},
+    {"by": "label", "value": "保存する"},
 ]
 
 # 「ログイン」ボタン
@@ -125,6 +133,15 @@ def login(page, login_url: str, creds: Credentials, timeout_ms: int) -> None:
         check_target(page, COMPLIANCE_TARGETS, timeout_ms)
     else:
         log.info("規程遵守チェック項目は見つかりませんでした（この画面には無い可能性）。続行します。")
+
+    # 3b) 「ユーザID・パスワードを保存する」チェック（REINSはこれも必須）。
+    if is_visible(page, SAVE_CREDS_TARGETS, timeout_ms=3000):
+        log.info("「ユーザID・パスワードを保存する」にチェックを付けます。")
+        check_target(page, SAVE_CREDS_TARGETS, timeout_ms)
+    else:
+        log.info("「保存する」チェック項目は見つかりませんでした。続行します。")
+
+    screenshot(page, "02b_checkboxes_checked")
 
     # 4) ログインボタンをクリック
     log.info("「ログイン」ボタンをクリックします。")

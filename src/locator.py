@@ -148,11 +148,75 @@ def select_target(page, targets, value, timeout_ms) -> None:
         locator.select_option(value=str(value), timeout=timeout_ms)
 
 
+def _safe_is_checked(locator) -> bool:
+    """チェック状態を安全に取得（取得できない場合はFalse扱い）。"""
+    try:
+        return bool(locator.is_checked())
+    except Exception:
+        return False
+
+
+def _click_associated_label(page, locator, timeout_ms) -> bool:
+    """
+    チェックボックス本体に対応する<label>をクリックします。
+
+    REINSのようなBootstrapVue製のカスタムチェックボックスは、本物の<input>が
+    透明(opacity:0)で隠れ、その上に<label>が覆いかぶさっています。
+    人間はラベル（文字部分）をクリックして切り替えるので、同じ操作を行います。
+    <label for="＜inputのid＞"> を探してクリックします。
+    """
+    try:
+        input_id = locator.get_attribute("id")
+    except Exception:
+        input_id = None
+    if not input_id:
+        return False
+    label = page.locator(f"label[for={_css_quote(input_id)}]")
+    try:
+        if label.count() > 0:
+            label.first.click(timeout=timeout_ms)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def check_target(page, targets, timeout_ms) -> None:
-    """チェックボックスにチェックを付けます（既に付いていれば何もしません）。"""
+    """
+    チェックボックスにチェックを付けます（既に付いていれば何もしません）。
+
+    隠れた入力欄(カスタムチェックボックス)にも対応するため、次の順で試します:
+        1) 既にチェック済みなら何もしない
+        2) 対応する<label>をクリック（人間と同じ操作。最も確実）
+        3) force指定で入力欄を直接切り替え
+        4) 通常のcheck（ここまで失敗した場合は例外を上位へ）
+    """
+    log = get_logger()
     locator, _ = resolve_locator(page, targets, timeout_ms)
-    if not locator.is_checked():
-        locator.check(timeout=timeout_ms)
+
+    # 1) 既にチェック済み
+    if _safe_is_checked(locator):
+        return
+
+    short = min(timeout_ms, 5000)
+
+    # 2) 対応するラベルをクリック
+    if _click_associated_label(page, locator, short):
+        if _safe_is_checked(locator):
+            log.info("  → ラベルをクリックしてチェックを付けました。")
+            return
+
+    # 3) force指定で直接切り替え
+    try:
+        locator.check(force=True, timeout=short)
+        if _safe_is_checked(locator):
+            log.info("  → force指定でチェックを付けました。")
+            return
+    except Exception as exc:
+        log.debug("  ・force checkで失敗: %s", type(exc).__name__)
+
+    # 4) 通常のcheck（最後の手段。失敗すれば例外が上位に伝わる）
+    locator.check(timeout=timeout_ms)
 
 
 def is_visible(page, targets, timeout_ms) -> bool:
