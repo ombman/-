@@ -18,6 +18,7 @@ resolve_locator() / click_target() などを呼びます。
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app_logger import get_logger
@@ -25,6 +26,22 @@ from app_logger import get_logger
 
 class ElementNotFoundError(Exception):
     """どの特定方法でも対象が見つからなかったときに送出します。"""
+
+
+def flexible_text_regex(value: str) -> "re.Pattern[str]":
+    """
+    「スペースや改行の有無を無視して」文字列に一致する正規表現を作ります。
+
+    REINSはボタン名を「売買 物件検索」のように語の間にスペースを入れて表示する
+    ことがあり、"売買物件検索"（スペース無し）では一致しません。そこで各文字の
+    間に \\s*（空白ゼロ個以上）を差し込み、表示上のスペース差を吸収します。
+    例: "売買物件検索" → 売\\s*買\\s*物\\s*件\\s*検\\s*索
+    （部分一致。前後に他の文字があっても、この並びが含まれていればヒット）
+    """
+    stripped = re.sub(r"\s+", "", str(value))
+    if not stripped:
+        return re.compile(".*")
+    return re.compile(r"\s*".join(re.escape(ch) for ch in stripped))
 
 
 def _build_locator(page, by: str, value: str, options: dict[str, Any] | None = None):
@@ -50,11 +67,17 @@ def _build_locator(page, by: str, value: str, options: dict[str, Any] | None = N
     if by == "role":
         # value が空のときは「名前で絞らず、その役割の要素」を対象にする。
         # 例: role=textbox（文字入力欄）を名前指定なしで掴む。
-        if value:
-            return page.get_by_role(role_name, name=value, exact=exact)
-        return page.get_by_role(role_name)
+        if not value:
+            return page.get_by_role(role_name)
+        if exact:
+            return page.get_by_role(role_name, name=value, exact=True)
+        # 既定はスペースの有無を無視して名前一致（REINSの「売買 物件検索」対策）
+        return page.get_by_role(role_name, name=flexible_text_regex(value))
     if by == "text":
-        return page.get_by_text(value, exact=exact)
+        if exact:
+            return page.get_by_text(value, exact=True)
+        # 既定はスペースの有無を無視して部分一致
+        return page.get_by_text(flexible_text_regex(value))
     if by == "placeholder":
         return page.get_by_placeholder(value, exact=exact)
     if by == "name":

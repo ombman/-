@@ -31,6 +31,7 @@ from locator import (
     check_target,
     click_target,
     fill_target,
+    flexible_text_regex,
     is_visible,
     resolve_locator,
     select_target,
@@ -187,7 +188,10 @@ def _check_verify(page, verify: dict[str, Any], timeout_ms: int) -> None:
     contains = verify.get("contains")
     if contains:
         try:
-            page.get_by_text(contains).first.wait_for(state="visible", timeout=timeout_ms)
+            # スペースの有無を無視して判定（REINSの表示ゆれ対策）
+            page.get_by_text(flexible_text_regex(contains)).first.wait_for(
+                state="visible", timeout=timeout_ms
+            )
         except Exception as exc:
             raise StepError(f"確認失敗: 画面に「{contains}」が見つかりません。") from exc
 

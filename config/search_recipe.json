@@ -39,14 +39,14 @@
     },
     { "id": "select_bukken_shubetsu1_baimansion",
       "description": "「物件種別1」から「売マンション」を選択する",
-      "action": "select",
+      "action": "choose",
       "value": "売マンション",
       "targets": [
         { "by": "label", "value": "物件種別1" },
         { "by": "name", "value": "bukkenShubetsu1" },
         { "by": "css", "value": "select[name*='shubetsu']" }
       ],
-      "note": "select要素でない場合は action を choose に変えてください。",
+      "note": "choose=プルダウンでもクリック式（チェック/ボタン）でも選べる。",
       "verify": { "contains": "売マンション" }
     },
 
@@ -82,7 +82,7 @@
       "verify": { "contains": "東海道線" } },
     { "id": "ensen1_walk_min", "description": "駅から徒歩に 10 を入力", "action": "fill", "value": "10",
       "targets": [ { "by": "label", "value": "駅から徒歩" }, { "by": "name", "value": "walkMinutes1" }, { "by": "css", "value": "input[name*='walk']" } ] },
-    { "id": "ensen1_walk_unit", "description": "駅から徒歩の単位で「分」を選択", "action": "select", "value": "分",
+    { "id": "ensen1_walk_unit", "description": "駅から徒歩の単位で「分」を選択", "action": "choose", "value": "分",
       "targets": [ { "by": "label", "value": "単位" }, { "by": "name", "value": "walkUnit1" } ],
       "note": "単位が固定表示なら本ステップは削除可。プルダウンでなければ action:choose に変更。" },
 
@@ -120,7 +120,7 @@
       "verify": { "contains": "阪急神戸線" } },
     { "id": "ensen2_walk_min", "description": "駅から徒歩に 10 を入力", "action": "fill", "value": "10",
       "targets": [ { "by": "name", "value": "walkMinutes2" }, { "by": "label", "value": "駅から徒歩" }, { "by": "css", "value": "input[name*='walk']" } ] },
-    { "id": "ensen2_walk_unit", "description": "駅から徒歩の単位で「分」を選択", "action": "select", "value": "分",
+    { "id": "ensen2_walk_unit", "description": "駅から徒歩の単位で「分」を選択", "action": "choose", "value": "分",
       "targets": [ { "by": "name", "value": "walkUnit2" }, { "by": "label", "value": "単位" } ],
       "note": "プルダウンでなければ action:choose に変更。" },
 
@@ -163,7 +163,7 @@
       "verify": { "contains": "阪神本線" } },
     { "id": "ensen3_walk_min", "description": "駅から徒歩に 10 を入力", "action": "fill", "value": "10",
       "targets": [ { "by": "name", "value": "walkMinutes3" }, { "by": "label", "value": "駅から徒歩" }, { "by": "css", "value": "input[name*='walk']" } ] },
-    { "id": "ensen3_walk_unit", "description": "駅から徒歩の単位で「分」を選択", "action": "select", "value": "分",
+    { "id": "ensen3_walk_unit", "description": "駅から徒歩の単位で「分」を選択", "action": "choose", "value": "分",
       "targets": [ { "by": "name", "value": "walkUnit3" }, { "by": "label", "value": "単位" } ],
       "note": "プルダウンでなければ action:choose に変更。" },
 
