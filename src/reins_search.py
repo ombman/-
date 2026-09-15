@@ -201,9 +201,11 @@ def _click_download(page, targets, timeout_ms) -> None:
         except Exception:
             pass
 
-    # クリックして最初のダウンロードを確保
+    # クリックして最初のダウンロードを確保。
+    # 図面は別窓(ポップアップ)で落ちるため self.page 側では検出できないことがある。
+    # その場合は expect_download が短時間で諦め、下の収集ループ(_grab)で拾う。
     try:
-        with page.expect_download(timeout=timeout_ms) as di:
+        with page.expect_download(timeout=min(timeout_ms, 6000)) as di:
             try:
                 click_target(page, targets, timeout_ms)
             except Exception as exc:

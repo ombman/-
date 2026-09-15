@@ -80,27 +80,14 @@ class BrowserSession:
 
         self._context.set_default_timeout(int(self.settings.get("default_timeout_ms", 15000)))
 
-        # 図面一括取得は「別ウィンドウ(window.open)で開いてダウンロードし、その窓を閉じる」
-        # 挙動のため、Playwrightが保存する前に接続が切れる。対策として:
-        #   1) window.open を無効化し、代わりに“今のページ”でダウンロード(URL遷移)させる
-        #      → 閉じられる別ウィンドウ自体を作らせない
-        #   2) window.close も無効化して、今のページを閉じさせない
-        # これでダウンロードは現在のページ上で発生し、閉じられず保存が完了できる。
+        # 図面の一括取得は「2つの小窓(window.open)で2ファイルを落とし、各窓を閉じる」挙動。
+        # ダウンロードURLは開始時に捕捉して urllib で別途保存するため、窓が閉じても問題ない。
+        # window.close だけ無効化し、URLを捕まえる猶予をわずかに稼ぐ（window.openは触らない：
+        # 触ると2つ目のダウンロードが発生しなくなるため）。
         try:
-            self._context.add_init_script(
-                "(function(){"
-                "  try{ window.close = function(){}; }catch(e){}"
-                "  try{"
-                "    window.open = function(url){"
-                "      try{ if(url){ window.location.href = url; } }catch(e){}"
-                "      return { close:function(){}, focus:function(){}, blur:function(){},"
-                "               closed:false, document:document, location:window.location };"
-                "    };"
-                "  }catch(e){}"
-                "})();"
-            )
+            self._context.add_init_script("try{ window.close = function(){}; }catch(e){}")
         except Exception as exc:
-            log.debug("window.open/close 無効化スクリプトの登録に失敗（続行）: %s", exc)
+            log.debug("window.close 無効化スクリプトの登録に失敗（続行）: %s", exc)
 
         # 既に開いているタブがあれば使い、無ければ新規に開く
         # ※図面のダウンロード保存は reins_search の click_download が
