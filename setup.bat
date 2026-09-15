@@ -1,6 +1,12 @@
 @echo off
-setlocal
+setlocal enableextensions
 cd /d "%~dp0"
+set "LOG=%~dp0setup_log.txt"
+set "RC=1"
+
+echo Setup log (open this file if the window closes).> "%LOG%"
+echo Date: %date% %time%>> "%LOG%"
+echo Folder: %~dp0>> "%LOG%"
 
 echo.
 echo ============================================================
@@ -18,11 +24,10 @@ if not defined PYCMD (
     echo   Install Python 3.12 or newer from:
     echo     https://www.python.org/downloads/windows/
     echo   During install, CHECK "Add python.exe to PATH".
-    echo.
-    pause
-    exit /b 1
+    goto :done
 )
 echo   Using Python command: %PYCMD%
+echo Using %PYCMD%>> "%LOG%"
 
 echo.
 echo [2/4] Creating a private environment (.venv)...
@@ -31,43 +36,53 @@ if exist ".venv" if not exist ".venv\Scripts\python.exe" (
     echo   Removing an incomplete .venv folder...
     rmdir /s /q ".venv"
 )
-%PYCMD% -m venv .venv
-if errorlevel 1 (
+echo ---- venv attempt 1: %PYCMD% ---->> "%LOG%"
+%PYCMD% -m venv .venv >> "%LOG%" 2>&1
+if not exist ".venv\Scripts\python.exe" (
+    echo   Retrying with "python"...
+    echo ---- venv attempt 2: python ---->> "%LOG%"
+    where python >nul 2>&1 && python -m venv .venv >> "%LOG%" 2>&1
+)
+if not exist ".venv\Scripts\python.exe" (
     echo.
     echo [ERROR] Failed to create the virtual environment.
-    echo -------------------------------------------------------
-    echo  Common causes:
-    echo   1) Not enough free disk space
-    echo      Delete old duplicate folders / ZIP files to free space.
-    echo   2) The folder path is too deep / too long
-    echo      Put the app in a short path such as C:\reins
-    echo   3) No write permission for this folder
-    echo -------------------------------------------------------
-    echo  Free space on this drive:
-    dir /-c "%~d0\" | find "bytes free"
-    echo.
-    pause
-    exit /b 1
+    echo   Details were saved to:  setup_log.txt  (same folder as this file)
+    echo   Common causes:
+    echo     1) Not enough free disk space
+    echo     2) The folder path is too deep / too long
+    echo     3) No write permission for this folder
+    powershell -NoProfile -Command "try { $l=('%~d0').TrimEnd(':'); $f=(Get-PSDrive $l).Free; Write-Host ('  Free space on %~d0 {0:N1} GB' -f ($f/1GB)) } catch {}"
+    goto :done
 )
+echo   .venv created OK.
 
 echo.
 echo [3/4] Installing required libraries...
-".venv\Scripts\python.exe" -m pip install --upgrade pip
-".venv\Scripts\python.exe" -m pip install -r requirements.txt
+echo ---- pip upgrade ---->> "%LOG%"
+".venv\Scripts\python.exe" -m pip install --upgrade pip >> "%LOG%" 2>&1
+echo ---- pip install -r requirements.txt ---->> "%LOG%"
+".venv\Scripts\python.exe" -m pip install -r requirements.txt >> "%LOG%" 2>&1
 if errorlevel 1 (
-    echo [ERROR] Failed to install libraries.
-    pause
-    exit /b 1
+    echo [ERROR] Failed to install libraries.  See setup_log.txt for details.
+    goto :done
 )
 
 echo.
 echo [4/4] Preparing browser components...
-".venv\Scripts\python.exe" -m playwright install chromium
+echo ---- playwright install chromium ---->> "%LOG%"
+".venv\Scripts\python.exe" -m playwright install chromium >> "%LOG%" 2>&1
 
+set "RC=0"
 echo.
 echo ============================================================
 echo  Setup finished successfully.
 echo  Next step: double-click run.bat to start the app.
 echo ============================================================
+
+:done
 echo.
-pause
+echo ------------------------------------------------------------
+echo  This window will stay open. Press any key to close it.
+echo ------------------------------------------------------------
+pause >nul
+exit /b %RC%
