@@ -172,6 +172,7 @@ def _click_download(page, targets, timeout_ms) -> None:
       4) それでも駄目なら従来の save_as を試す。
     """
     import time as _t
+    import urllib.error
     import urllib.request
 
     from browser import DOWNLOAD_DIR
@@ -322,36 +323,67 @@ def _click_download(page, targets, timeout_ms) -> None:
 
     log.info("保存対象の図面ファイル数: %d", len(targets_dl))
 
-    # ブラウザから独立して、Cookie付きでURLから直接ダウンロードして保存する
-    saved = 0
-    for i, (url, fname) in enumerate(targets_dl, start=1):
+    # ブラウザから独立して、Cookie付きでURLから直接ダウンロードして保存する。
+    # ※通常のブラウザは2ファイルをほぼ同時に取得する。順次に取ると「先に取り終えた側が
+    #   相手を無効化する」挙動で2つ目が400になることがあるため、全ファイルを“並行”で取得する。
+    import threading
+
+    headers = {
+        "Cookie": cookie_header,
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://system.reins.jp/",
+    }
+    stamp = _t.strftime("%Y%m%d%H%M%S")
+    results: dict[int, tuple] = {}
+
+    def _fetch(idx: int, url: str, fname: str):
         try:
-            stamp = _t.strftime("%Y%m%d%H%M%S")
-            name = fname or f"zmn_list_{stamp}_{i}.pdf"
+            name = fname or f"zmn_list_{stamp}_{idx}.pdf"
             if not name.lower().endswith(".pdf"):
                 name += ".pdf"
             dest = DOWNLOAD_DIR / name
             if dest.exists():
-                dest = DOWNLOAD_DIR / f"{dest.stem}_{stamp}_{i}{dest.suffix}"
-            req = urllib.request.Request(
-                url,
-                headers={
-                    "Cookie": cookie_header,
-                    "User-Agent": "Mozilla/5.0",
-                    "Referer": "https://system.reins.jp/",
-                },
-            )
+                dest = DOWNLOAD_DIR / f"{dest.stem}_{stamp}_{idx}{dest.suffix}"
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=180) as r:
                 data = r.read()
             if not data or len(data) < 500:
-                log.warning("応答が小さすぎます（%dバイト）: %s", len(data) if data else 0, url)
-                continue
+                results[idx] = ("small", len(data) if data else 0, url)
+                return
             with open(dest, "wb") as f:
                 f.write(data)
-            log.info("図面を保存しました（%dバイト）: %s", len(data), dest)
+            results[idx] = ("ok", str(dest), len(data))
+        except urllib.error.HTTPError as he:
+            body = ""
+            try:
+                body = he.read().decode("utf-8", "replace")[:400]
+            except Exception:
+                pass
+            results[idx] = ("http", he.code, body, url)
+        except Exception as exc:  # noqa: BLE001
+            results[idx] = ("err", str(exc), url)
+
+    threads = [
+        threading.Thread(target=_fetch, args=(i, url, fname), daemon=True)
+        for i, (url, fname) in enumerate(targets_dl, start=1)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=200)
+
+    saved = 0
+    for idx in sorted(results):
+        r = results[idx]
+        if r[0] == "ok":
+            log.info("図面を保存しました（%dバイト）: %s", r[2], r[1])
             saved += 1
-        except Exception as exc:
-            log.warning("図面の保存に失敗（%s）: %s", url, exc)
+        elif r[0] == "http":
+            log.warning("図面の保存に失敗（HTTP %s）本文=%s URL=%s", r[1], r[2], r[3])
+        elif r[0] == "small":
+            log.warning("応答が小さすぎます（%dバイト）: %s", r[1], r[2])
+        else:
+            log.warning("図面の保存に失敗（%s）: %s", r[1], r[2])
 
     if saved == 0:
         raise StepError("図面ダウンロードURLからの保存にすべて失敗しました。")
