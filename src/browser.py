@@ -78,6 +78,14 @@ class BrowserSession:
 
         self._context.set_default_timeout(int(self.settings.get("default_timeout_ms", 15000)))
 
+        # 「図面一括取得」後にREINSが window.close() で操作ウィンドウを閉じてしまい、
+        # その拍子にダウンロード保存が中断される。window.close を無効化して、
+        # ダウンロードが完了するまでページを閉じさせない。
+        try:
+            self._context.add_init_script("window.close = function(){};")
+        except Exception as exc:
+            log.debug("window.close 無効化スクリプトの登録に失敗（続行）: %s", exc)
+
         # ダウンロード（図面など）を downloads フォルダへ確実に保存する。
         # ※Playwrightは download イベントを受けて save_as しないとファイルが残らない。
         self._context.on("page", lambda p: p.on("download", self._save_download))
