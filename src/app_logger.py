@@ -87,3 +87,22 @@ def screenshot(page, name: str) -> Path | None:
     except Exception as exc:  # 画面写真の失敗で全体を止めない
         get_logger().warning("スクリーンショット保存に失敗: %s", exc)
         return None
+
+
+def dump_html(page, name: str) -> Path | None:
+    """
+    現在のページのHTML（DOM）をファイルに保存します。
+
+    セレクタ調整のために「実際の画面の構造」を丸ごと残す用途で使います。
+    保存先: logs/<時刻>_<name>.html
+    """
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%H%M%S")
+        path = LOG_DIR / f"{stamp}_{name}.html"
+        path.write_text(page.content(), encoding="utf-8")
+        get_logger().info("HTML構造を保存しました: %s", path)
+        return path
+    except Exception as exc:  # HTML保存の失敗で全体を止めない
+        get_logger().warning("HTML保存に失敗: %s", exc)
+        return None

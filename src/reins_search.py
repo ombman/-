@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app_logger import get_logger, screenshot
+from app_logger import dump_html, get_logger, screenshot
 from locator import (
     ElementNotFoundError,
     check_target,
@@ -63,6 +63,8 @@ def run_recipe(page, recipe: dict[str, Any], settings: dict[str, Any]) -> None:
             _run_step(page, step, timeout_ms)
         except (ElementNotFoundError, StepError) as exc:
             screenshot(page, f"ERROR_step{index:02d}")
+            # セレクタ調整のため、失敗時点の画面HTMLも保存しておく
+            dump_html(page, f"ERROR_step{index:02d}")
             raise StepError(
                 f"ステップ {index}/{total}「{desc}」で停止しました。\n"
                 f"理由: {exc}\n"
@@ -113,6 +115,8 @@ def _run_step(page, step: dict[str, Any], default_timeout: int) -> None:
         _verify(page, step, timeout_ms)
     elif action == "screenshot":
         screenshot(page, _safe_name(step.get("id", "manual")))
+    elif action == "dump_html":
+        dump_html(page, _safe_name(step.get("id", "manual")))
     else:
         raise StepError(f"未知のアクションです: {action!r}")
 
