@@ -13,6 +13,7 @@ Google Chrome を Playwright 経由で起動・終了するモジュールです
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -76,9 +77,29 @@ class BrowserSession:
 
         self._context.set_default_timeout(int(self.settings.get("default_timeout_ms", 15000)))
 
+        # ダウンロード（図面など）を downloads フォルダへ確実に保存する。
+        # ※Playwrightは download イベントを受けて save_as しないとファイルが残らない。
+        self._context.on("page", lambda p: p.on("download", self._save_download))
+
         # 既に開いているタブがあれば使い、無ければ新規に開く
         self.page = self._context.pages[0] if self._context.pages else self._context.new_page()
+        # 現在のページにもダウンロード保存を登録
+        self.page.on("download", self._save_download)
         return self.page
+
+    def _save_download(self, download) -> None:
+        """ダウンロードされたファイルを downloads フォルダへ保存します。"""
+        log = get_logger()
+        try:
+            name = download.suggested_filename or f"download_{int(time.time())}"
+            target = DOWNLOAD_DIR / name
+            # 同名があれば上書きを避けてタイムスタンプを付与
+            if target.exists():
+                target = DOWNLOAD_DIR / f"{target.stem}_{int(time.time())}{target.suffix}"
+            download.save_as(str(target))
+            log.info("ダウンロードを保存しました: %s", target)
+        except Exception as exc:  # 保存失敗で全体を止めない
+            log.warning("ダウンロードの保存に失敗しました: %s", exc)
 
     def __exit__(self, exc_type, exc, tb):
         log = get_logger()
