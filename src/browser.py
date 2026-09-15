@@ -13,6 +13,7 @@ Google Chrome を Playwright 経由で起動・終了するモジュールです
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -25,6 +26,38 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 USER_DATA_DIR = ROOT_DIR / ".chrome-profile"
 # 図面などダウンロードファイルの保存先。
 DOWNLOAD_DIR = ROOT_DIR / "downloads"
+
+
+def _allow_multiple_downloads(log) -> None:
+    """
+    Chromeの既定では「1サイトからの複数自動ダウンロード」がブロックされ、
+    図面の2分割(2ファイル)のうち2つ目が落ちてこない。プロファイルの設定で
+    system.reins.jp からの複数ダウンロードを許可しておく。
+    """
+    try:
+        pref_dir = USER_DATA_DIR / "Default"
+        pref_dir.mkdir(parents=True, exist_ok=True)
+        pref_file = pref_dir / "Preferences"
+        data = {}
+        if pref_file.exists():
+            try:
+                data = json.loads(pref_file.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        profile = data.setdefault("profile", {})
+        # 全サイト共通: 複数自動ダウンロードを許可(1=許可)
+        dcs = profile.setdefault("default_content_setting_values", {})
+        dcs["automatic_downloads"] = 1
+        # 念のため reins ドメインを明示的に許可
+        cs = profile.setdefault("content_settings", {})
+        exc = cs.setdefault("exceptions", {})
+        auto = exc.setdefault("automatic_downloads", {})
+        for pat in ("https://system.reins.jp:443,*", "https://reins.jp:443,*", "[*.]reins.jp,*"):
+            auto[pat] = {"setting": 1}
+        pref_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        log.debug("複数ダウンロード許可の設定を適用しました。")
+    except Exception as exc:
+        log.debug("複数ダウンロード許可の設定に失敗（続行）: %s", exc)
 
 
 class BrowserSession:
@@ -46,6 +79,7 @@ class BrowserSession:
         log = get_logger()
         USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        _allow_multiple_downloads(log)
 
         self._pw = sync_playwright().start()
         channel = self.settings.get("browser_channel", "chrome")

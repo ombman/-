@@ -194,10 +194,22 @@ def _click_download(page, targets, timeout_ms) -> None:
         except Exception:
             pass
 
-    ctx.on("page", lambda p: p.on("download", _grab))
+    # 診断: ダウンロード関連のリクエストが何本飛んでいるかを記録
+    #（2本飛んで検出1なら Chrome の複数DLブロック、1本なら REINS 側の問題）
+    def _on_req(r):
+        try:
+            u = r.url or ""
+            low = u.lower()
+            if "reins" in low and ("datalizer" in low or "download" in low or "zmn" in low or ".pdf" in low):
+                get_logger().info("  ・DL関連リクエスト: %s", u[:140])
+        except Exception:
+            pass
+
+    ctx.on("page", lambda p: (p.on("download", _grab), p.on("request", _on_req)))
     for p in list(ctx.pages):
         try:
             p.on("download", _grab)
+            p.on("request", _on_req)
         except Exception:
             pass
 
