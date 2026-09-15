@@ -160,13 +160,19 @@
       "note": "色や位置ではなくボタン名で特定します。名称が違えばtargetsを調整。" },
     { "id": "wait_results", "description": "検索結果の表示を待つ", "action": "wait_ms", "value": 3000 },
     { "id": "dump_results", "description": "（診断）結果画面のHTMLを保存", "action": "dump_html", "optional": true },
-    { "id": "select_all_in_page", "description": "「ページ内全選択」をクリック", "action": "click", "optional": true,
+    { "id": "select_all_in_page", "description": "「ページ内全選択」をクリック", "action": "click",
       "targets": [ { "by": "role", "value": "ページ内全選択", "options": { "role": "button" } }, { "by": "text", "value": "ページ内全選択" }, { "by": "text", "value": "全選択" } ] },
-    { "id": "click_zumen_ikkatsu", "description": "「図面の一括取得」をクリック", "action": "click", "optional": true,
-      "targets": [ { "by": "role", "value": "図面の一括取得", "options": { "role": "button" } }, { "by": "text", "value": "図面の一括取得" }, { "by": "text", "value": "図面一括取得" } ] },
-    { "id": "dialog_ikkatsu", "description": "出てきた画面の「一括取得」をクリック", "action": "click", "optional": true,
-      "targets": [ { "by": "role", "value": "一括取得", "options": { "role": "button" } }, { "by": "text", "value": "一括取得" } ],
-      "note": "確認ダイアログ内の一括取得ボタン。ダウンロードはトップの downloads フォルダに保存されます。" },
-    { "id": "wait_download", "description": "図面ダウンロードの完了を待つ（時間は必要に応じて調整）", "action": "wait_ms", "value": 20000 }
+    { "id": "click_zumen_ikkatsu", "description": "「図面の一括取得」をクリック", "action": "click",
+      "targets": [ { "by": "role", "value": "図面一括取得", "options": { "role": "button" } }, { "by": "text", "value": "図面の一括取得" }, { "by": "text", "value": "図面一括取得" } ] },
+    { "id": "wait_dialog", "description": "確認ポップアップの表示を待つ", "action": "wait_ms", "value": 1500 },
+    { "id": "dialog_ikkatsu", "description": "出てきたポップアップ内の「一括取得」をクリック", "action": "click",
+      "targets": [
+        { "by": "css", "value": ".modal.show button:text-is('一括取得')" },
+        { "by": "css", "value": ".modal.show >> text=一括取得" },
+        { "by": "role", "value": "一括取得", "options": { "role": "button", "exact": true } },
+        { "by": "text", "value": "一括取得", "options": { "exact": true } }
+      ],
+      "note": "背後の『図面一括取得』ではなく、ポップアップ(.modal.show)内の『一括取得』を厳密一致(text-is)で狙う。ダウンロードはトップの downloads フォルダに保存されます。" },
+    { "id": "wait_download", "description": "図面ダウンロードの完了を待つ（時間は必要に応じて調整）", "action": "wait_ms", "value": 30000 }
   ]
 }
