@@ -50,36 +50,78 @@
 
     { "id": "ensen1_start_eki", "description": "沿線1 始駅「甲子園口」を入力", "action": "fill", "value": "甲子園口",
       "scroll_into_view": true,
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[2]" } ],
-      "note": "沿線1見出し以降 input[2]=駅名(始)。沿線名(input[1])は完全一致リスク回避のため未入力。" },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/following::input[1]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[2]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線１']/following::input[2]" }
+      ],
+      "note": "『駅名』ラベルは沿線欄だけにある目印。(駅名ラベル1つ目)の次のinput[1]=始駅。沿線名は完全一致リスク回避のため未入力。" },
     { "id": "ensen1_end_eki", "description": "沿線1 終駅「さくら夙川」を入力", "action": "fill", "value": "さくら夙川",
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[3]" } ] },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/following::input[2]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[3]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線１']/following::input[3]" }
+      ] },
     { "id": "ensen1_walk", "description": "沿線1 駅から徒歩に 10 を入力", "action": "fill", "value": "10",
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[4]" } ] },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/following::input[3]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[4]" }
+      ] },
     { "id": "ensen1_walk_unit", "description": "沿線1 徒歩の単位を「分」に", "action": "select", "value": "分", "optional": true,
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::select[1]" } ],
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/following::select[1]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::select[1]" }
+      ],
       "note": "単位プルダウン。既定が分なら失敗しても続行(optional)。" },
 
     { "id": "ensen2_start_eki", "description": "沿線2 始駅「西宮北口」を入力", "action": "fill", "value": "西宮北口",
       "scroll_into_view": true,
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[2]" } ] },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/following::input[1]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[2]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線２']/following::input[2]" }
+      ] },
     { "id": "ensen2_end_eki", "description": "沿線2 終駅「夙川」を入力", "action": "fill", "value": "夙川",
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[3]" } ] },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/following::input[2]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[3]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線２']/following::input[3]" }
+      ] },
     { "id": "ensen2_walk", "description": "沿線2 駅から徒歩に 10 を入力", "action": "fill", "value": "10",
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[4]" } ] },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/following::input[3]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[4]" }
+      ] },
     { "id": "ensen2_walk_unit", "description": "沿線2 徒歩の単位を「分」に", "action": "select", "value": "分", "optional": true,
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::select[1]" } ] },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/following::select[1]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::select[1]" }
+      ] },
 
     { "id": "ensen3_start_eki", "description": "沿線3 始駅「甲子園」を入力", "action": "fill", "value": "甲子園",
       "scroll_into_view": true,
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[2]" } ] },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/following::input[1]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[2]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線３']/following::input[2]" }
+      ] },
     { "id": "ensen3_end_eki", "description": "沿線3 終駅「香櫨園」を入力", "action": "fill", "value": "香櫨園",
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[3]" } ],
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/following::input[2]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[3]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線３']/following::input[3]" }
+      ],
       "note": "ご指示『香露園』は実在駅『香櫨園』と解釈。違えば value を変更。" },
     { "id": "ensen3_walk", "description": "沿線3 駅から徒歩に 10 を入力", "action": "fill", "value": "10",
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[4]" } ] },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/following::input[3]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[4]" }
+      ] },
     { "id": "ensen3_walk_unit", "description": "沿線3 徒歩の単位を「分」に", "action": "select", "value": "分", "optional": true,
-      "targets": [ { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::select[1]" } ] },
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/following::select[1]" },
+        { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::select[1]" }
+      ] },
 
     { "id": "dump_after_ensen", "description": "（診断）沿線入力後の画面HTMLを保存（価格欄の構造把握用）", "action": "dump_html", "optional": true },
     { "id": "scroll_to_price", "description": "価格欄まで下方向にスクロール", "action": "scroll", "value": 500 },
