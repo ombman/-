@@ -222,17 +222,32 @@ def _click_download(page, targets, timeout_ms) -> None:
     except Exception as exc:
         log.debug("Cookie取得に失敗: %s", exc)
 
-    # 追加のダウンロード（2分割など）を数秒待って集める
-    deadline = _t.time() + 8
+    # 追加のダウンロード（2分割など）を待って集める。
+    # 2つ目が来たら少し待って打ち切り、来なければ最大時間まで待つ。
+    deadline = _t.time() + 20
     while _t.time() < deadline:
         live = next((p for p in ctx.pages if not p.is_closed()), None)
         if live is None:
-            break
+            # ページが全て閉じても、少しの間は追加ダウンロードイベントを待つ
+            try:
+                _t.sleep(0.5)
+            except Exception:
+                pass
+            if _t.time() >= deadline:
+                break
+            continue
         try:
             live.wait_for_timeout(500)
         except Exception:
+            try:
+                _t.sleep(0.5)
+            except Exception:
+                pass
+        if len(found) >= 2:
+            # 2つ揃ったら、念のためもう少しだけ待って終了
             break
 
+    log.info("検出したダウンロード件数: %d", len(found))
     if not found:
         raise StepError(
             "図面のダウンロードを検出できませんでした。"

@@ -60,9 +60,11 @@ class BrowserSession:
             slow_mo=slow_mo,
             args=["--start-maximized"],
             no_viewport=True,          # ウィンドウサイズに追従
-            accept_downloads=True,      # 図面などのダウンロードを許可
-            downloads_path=str(DOWNLOAD_DIR),  # ダウンロード保存先
+            accept_downloads=True,      # ダウンロードを検出できるようにする（保存はurllibで実施）
         )
+        # ※downloads_path は指定しない。指定するとPlaywrightが未完了DLを
+        #   記号名(GUID)の壊れファイルとして downloads に残すため。実体の保存は
+        #   reins_search の _click_download が Cookie付きurllibで確実に行う。
 
         try:
             self._context = self._pw.chromium.launch_persistent_context(
