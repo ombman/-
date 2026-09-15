@@ -62,6 +62,10 @@ def run_recipe(page, recipe: dict[str, Any], settings: dict[str, Any]) -> None:
         try:
             _run_step(page, step, timeout_ms)
         except (ElementNotFoundError, StepError) as exc:
+            # optional=true のステップは、失敗しても止めずに続行する
+            if step.get("optional"):
+                log.warning("  [任意ステップ] 失敗しましたが続行します: %s", exc)
+                continue
             screenshot(page, f"ERROR_step{index:02d}")
             # セレクタ調整のため、失敗時点の画面HTMLも保存しておく
             dump_html(page, f"ERROR_step{index:02d}")
