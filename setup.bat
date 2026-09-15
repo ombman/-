@@ -34,17 +34,23 @@ echo Using %PYCMD%>> "%LOG%"
 
 echo.
 echo [2/4] Creating a private environment (.venv)...
-rem If an incomplete .venv (no python.exe) remains, remove it first.
-if exist ".venv" if not exist ".venv\Scripts\python.exe" (
-    echo   Removing an incomplete .venv folder...
-    rmdir /s /q ".venv"
-)
-echo ---- venv attempt 1: %PYCMD% ---->> "%LOG%"
-%PYCMD% -m venv .venv >> "%LOG%" 2>&1
-if not exist ".venv\Scripts\python.exe" if defined PYALT (
-    echo   Retrying with "%PYALT%"...
-    echo ---- venv attempt 2: %PYALT% ---->> "%LOG%"
-    %PYALT% -m venv .venv >> "%LOG%" 2>&1
+if exist ".venv\Scripts\python.exe" (
+    rem A valid .venv already exists - reuse it (do NOT recreate; that can break it).
+    echo   .venv already exists - reusing it.
+    echo ---- reuse existing .venv ---->> "%LOG%"
+) else (
+    rem Remove any incomplete .venv, then create a fresh one.
+    if exist ".venv" (
+        echo   Removing an incomplete .venv folder...
+        rmdir /s /q ".venv"
+    )
+    echo ---- venv attempt 1: %PYCMD% ---->> "%LOG%"
+    %PYCMD% -m venv .venv >> "%LOG%" 2>&1
+    if not exist ".venv\Scripts\python.exe" if defined PYALT (
+        echo   Retrying with "%PYALT%"...
+        echo ---- venv attempt 2: %PYALT% ---->> "%LOG%"
+        %PYALT% -m venv .venv >> "%LOG%" 2>&1
+    )
 )
 if not exist ".venv\Scripts\python.exe" (
     echo.
