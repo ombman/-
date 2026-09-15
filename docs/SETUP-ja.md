@@ -4,6 +4,26 @@
 
 ---
 
+## ⚠ 前提：サイトの種類に注意（最重要）
+
+本構成は Wix の **Velo（サイトコード）** を使います。Velo が使えるのは以下だけです。
+
+| サイトの種類 | Velo（サイトコード） | 本構成の可否 |
+|---|---|---|
+| Wix エディタ（クラシック） | ○ 使える | **可** |
+| Wix Studio | ○ 使える | **可** |
+| **Wix Harmony（AI生成エディタ）** | **× 使えない** | **不可**（HTML/JS/CSSの埋め込みのみ対応） |
+
+出典: [Types of Wix Sites](https://dev.wix.com/docs/overview/platform-overview/types-of-wix-sites)
+— "Wix Harmony is Wix's AI-powered editor. Harmony sites don't support site code."
+
+Harmony サイトでもウィジェットの画面・読み取り・削除・LINEボタンは動作しますが、
+**Wix CMS と接続できないため、管理者が登録した物件が訪問者に表示されません**
+（そのブラウザにのみ保存される「標準モード」になります）。
+必ず **Wix エディタ（クラシック）または Wix Studio** のサイトをご用意ください。
+
+---
+
 ## 0. 全体の構成（なぜこの作りなのか）
 
 | 要件 | 実現方法 | 理由 |
@@ -31,10 +51,16 @@
 3. 同梱の `.github/workflows/pages.yml` が `wix-embed/` を公開します
 4. 公開URLは `https://<ユーザー名>.github.io/<リポジトリ名>/index.html`
 
-### 方法B：Wix の HTML 埋め込みに直接貼り付け
-Wix エディタの **埋め込み → HTMLコード** に `wix-embed/index.html` の中身をそのまま貼る方法もあります。
-ただし本ファイルは約48,000文字あり、Wix のコード貼り付け欄の上限に近いサイズです（上限値は Wix の
-仕様変更があり得るため、エディタ上で貼り付けが通るか必ず確認してください）。**方法Aを推奨します。**
+### 方法B：Wix の HTML 埋め込みに直接貼り付け（推奨・URL不要）
+Wix エディタの **埋め込み → HTMLコード** に、圧縮版 `wix-embed/paste-into-wix.html` の中身を
+そのまま貼り付けます。外部の配信URLもドメイン設定も不要で、Wixサイト内で完結します。
+
+- 圧縮版は 33,625 文字（元 44,192 文字）です。`node test/build-paste.mjs` で再生成できます。
+- 編集は必ず `wix-embed/index.html` 側で行い、再生成してから貼り直してください。
+- 貼り付け方式では URL の `?mode=admin` が使えませんが、Velo ページコードが送る `setMode`
+  メッセージで画面が切り替わるため問題ありません（テスト済み）。
+- 独自ドメインが既に Wix に接続されている場合（例：`ombman.com`）、Wix はファイルサーバでは
+  ないため、そのドメイン配下に HTML ファイルを置くことはできません。方法Bを使ってください。
 
 ---
 
