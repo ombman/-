@@ -162,10 +162,14 @@ def _click_download(page, targets, timeout_ms) -> None:
     """
     「クリックして図面をダウンロード保存」する専用処理。
 
-    REINSは『一括取得』クリック直後にウィンドウを閉じてしまうため、通常のクリック→
-    非同期ハンドラでは保存前に接続が切れる。そこで expect_download で「クリックする前に
-    ダウンロードを予約」して権利を確保し、閉じられる前に保存する。
-    ポップアップ(別タブ)経由のダウンロードにも備え、コンテキストのdownloadも拾う。
+    REINSは『一括取得』直後に操作ウィンドウを閉じるため、ブラウザ任せの
+    ダウンロード（save_as）は保存前に接続が切れて失敗する。
+    そこで:
+      1) クリック時のリクエスト（メソッド/本文/URL）を記録し、
+      2) expect_download でダウンロードURLを取得したら、
+      3) ログイン中のセッション(=context.request、Cookie共有)で“URLから直接”取得して保存する。
+         これはブラウザのページ生存に依存しないため、ウィンドウが閉じても保存できる。
+      4) それでも駄目なら従来の save_as を試す。
     """
     import time as _t
 
@@ -174,16 +178,24 @@ def _click_download(page, targets, timeout_ms) -> None:
     log = get_logger()
     ctx = page.context
     box: dict[str, Any] = {"d": None}
+    reqs: list[Any] = []
 
     def _grab(d):
         if box["d"] is None:
             box["d"] = d
 
-    # 別タブ（ポップアップ）で発生するダウンロードにも備える
-    ctx.on("page", lambda p: p.on("download", _grab))
+    def _on_req(r):
+        try:
+            reqs.append(r)
+        except Exception:
+            pass
+
+    # ダウンロード＆リクエストを、現在および今後のページで捕捉する
+    ctx.on("page", lambda p: (p.on("download", _grab), p.on("request", _on_req)))
     for p in list(ctx.pages):
         try:
             p.on("download", _grab)
+            p.on("request", _on_req)
         except Exception:
             pass
 
@@ -218,8 +230,48 @@ def _click_download(page, targets, timeout_ms) -> None:
     dest = DOWNLOAD_DIR / name
     if dest.exists():
         dest = DOWNLOAD_DIR / f"{dest.stem}_{int(_t.time())}{dest.suffix}"
+
+    dl_url = None
+    try:
+        dl_url = download.url
+    except Exception:
+        dl_url = None
+
+    # 方式A: ログイン中セッションでURLから直接取得（ページ生存に依存しない＝最も確実）
+    if dl_url:
+        matched = None
+        for r in reqs:
+            try:
+                if r.url == dl_url:
+                    matched = r
+                    break
+            except Exception:
+                continue
+        try:
+            if matched is not None and str(getattr(matched, "method", "GET")).upper() == "POST":
+                ct = "application/x-www-form-urlencoded"
+                try:
+                    ct = matched.headers.get("content-type", ct)
+                except Exception:
+                    pass
+                resp = ctx.request.post(dl_url, data=(matched.post_data or ""),
+                                        headers={"content-type": ct})
+            else:
+                resp = ctx.request.get(dl_url)
+            body = resp.body()
+            if body and len(body) > 200:  # それらしい実体があれば保存
+                with open(dest, "wb") as f:
+                    f.write(body)
+                log.info("図面を保存しました（%dバイト, セッション直取得）: %s", len(body), dest)
+                return
+            log.warning("URL直取得の応答が小さすぎます（%dバイト）。save_asを試します。",
+                        len(body) if body else 0)
+        except Exception as exc:
+            log.warning("URL直取得に失敗（%s）。save_asを試します。", exc)
+
+    # 方式B: 従来の save_as（ページが生きていれば成功する）
     download.save_as(str(dest))
-    log.info("図面をダウンロード保存しました: %s", dest)
+    log.info("図面をダウンロード保存しました（save_as）: %s", dest)
 
 
 def _scroll_into_view(page, targets, timeout_ms) -> None:
