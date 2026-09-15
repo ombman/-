@@ -48,8 +48,13 @@
       "note": "『売マンション』という選択肢を持つ<select>を直接狙う。.first で物件種別1を選ぶ。"
     },
 
-    { "id": "ensen1_start_eki", "description": "沿線1 始駅「甲子園口」を入力", "action": "fill", "value": "甲子園口",
+    { "id": "ensen1_senro", "description": "沿線1 沿線名を入力（駅名がある場合は必須・完全一致）", "action": "fill", "value": "東海道線",
       "scroll_into_view": true,
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/preceding::input[1]" }
+      ],
+      "note": "駅名ラベルの直前のinput=沿線名。正式表記が違えばvalueを変更（完全一致のため）。" },
+    { "id": "ensen1_start_eki", "description": "沿線1 始駅「甲子園口」を入力", "action": "fill", "value": "甲子園口",
       "targets": [
         { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/following::input[1]" },
         { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[2]" },
@@ -74,8 +79,12 @@
       ],
       "note": "単位プルダウン。既定が分なら失敗しても続行(optional)。" },
 
-    { "id": "ensen2_start_eki", "description": "沿線2 始駅「西宮北口」を入力", "action": "fill", "value": "西宮北口",
+    { "id": "ensen2_senro", "description": "沿線2 沿線名を入力（駅名がある場合は必須・完全一致）", "action": "fill", "value": "阪急神戸線",
       "scroll_into_view": true,
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/preceding::input[1]" }
+      ] },
+    { "id": "ensen2_start_eki", "description": "沿線2 始駅「西宮北口」を入力", "action": "fill", "value": "西宮北口",
       "targets": [
         { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/following::input[1]" },
         { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[2]" },
@@ -98,8 +107,12 @@
         { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::select[1]" }
       ] },
 
-    { "id": "ensen3_start_eki", "description": "沿線3 始駅「甲子園」を入力", "action": "fill", "value": "甲子園",
+    { "id": "ensen3_senro", "description": "沿線3 沿線名を入力（駅名がある場合は必須・完全一致）", "action": "fill", "value": "阪神本線",
       "scroll_into_view": true,
+      "targets": [
+        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/preceding::input[1]" }
+      ] },
+    { "id": "ensen3_start_eki", "description": "沿線3 始駅「甲子園」を入力", "action": "fill", "value": "甲子園",
       "targets": [
         { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/following::input[1]" },
         { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[2]" },
