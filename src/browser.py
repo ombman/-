@@ -40,6 +40,7 @@ class BrowserSession:
         self._pw = None
         self._context = None
         self.page = None
+        self._keepalive = None  # ダウンロード保存中に接続が切れないための常駐タブ
 
     def __enter__(self):
         log = get_logger()
@@ -85,6 +86,18 @@ class BrowserSession:
         self.page = self._context.pages[0] if self._context.pages else self._context.new_page()
         # 現在のページにもダウンロード保存を登録
         self.page.on("download", self._save_download)
+
+        # 保存用の常駐タブ（keep-alive）を1枚開く。
+        # 図面の一括取得後にREINSが操作ウィンドウを閉じても、この空タブが残るため
+        # コンテキスト（ブラウザ接続）が生き続け、ダウンロードを保存しきれる。
+        try:
+            self._keepalive = self._context.new_page()
+            self._keepalive.on("download", self._save_download)
+            self.page.bring_to_front()
+        except Exception as exc:
+            log.debug("keep-aliveタブの作成に失敗（続行）: %s", exc)
+            self._keepalive = None
+
         return self.page
 
     def _save_download(self, download) -> None:

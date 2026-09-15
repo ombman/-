@@ -115,7 +115,7 @@ def _run_step(page, step: dict[str, Any], default_timeout: int) -> None:
     elif action == "wait_for":
         resolve_locator(page, targets, timeout_ms)
     elif action == "wait_ms":
-        page.wait_for_timeout(int(value or 1000))
+        _safe_wait(page, int(value or 1000))
     elif action == "verify":
         _verify(page, step, timeout_ms)
     elif action == "screenshot":
@@ -170,6 +170,32 @@ def _scroll_page(page, step) -> None:
     """ページを指定方向・量だけスクロールします。"""
     dy = int(step.get("value", 600))
     page.mouse.wheel(0, dy)
+
+
+def _safe_wait(page, ms: int) -> None:
+    """
+    指定ミリ秒待ちます。図面ダウンロード後にREINSが操作ページを閉じても
+    エラーにならないよう、生きているタブ（keep-alive等）で待機します。
+    ※Playwrightのイベント（ダウンロード保存）を処理するため time.sleep ではなく
+      Page.wait_for_timeout を使います。
+    """
+    try:
+        if not page.is_closed():
+            page.wait_for_timeout(ms)
+            return
+    except Exception:
+        pass
+    # ページが閉じている場合は、コンテキスト内の生きているタブで待つ
+    try:
+        for p in page.context.pages:
+            try:
+                if not p.is_closed():
+                    p.wait_for_timeout(ms)
+                    return
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 
 def _verify(page, step, timeout_ms) -> None:
