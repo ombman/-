@@ -15,9 +15,12 @@ echo ============================================================
 
 echo.
 echo [1/4] Checking Python...
+rem Prefer "python" (worked before on this PC); use "py -3" only as backup.
 set "PYCMD="
-where py >nul 2>&1 && set "PYCMD=py -3"
-if not defined PYCMD ( where python >nul 2>&1 && set "PYCMD=python" )
+set "PYALT="
+where python >nul 2>&1 && set "PYCMD=python"
+if not defined PYCMD ( where py >nul 2>&1 && set "PYCMD=py -3" )
+if /I not "%PYCMD%"=="py -3" ( where py >nul 2>&1 && set "PYALT=py -3" )
 if not defined PYCMD (
     echo.
     echo [ERROR] Python was not found.
@@ -38,10 +41,10 @@ if exist ".venv" if not exist ".venv\Scripts\python.exe" (
 )
 echo ---- venv attempt 1: %PYCMD% ---->> "%LOG%"
 %PYCMD% -m venv .venv >> "%LOG%" 2>&1
-if not exist ".venv\Scripts\python.exe" (
-    echo   Retrying with "python"...
-    echo ---- venv attempt 2: python ---->> "%LOG%"
-    where python >nul 2>&1 && python -m venv .venv >> "%LOG%" 2>&1
+if not exist ".venv\Scripts\python.exe" if defined PYALT (
+    echo   Retrying with "%PYALT%"...
+    echo ---- venv attempt 2: %PYALT% ---->> "%LOG%"
+    %PYALT% -m venv .venv >> "%LOG%" 2>&1
 )
 if not exist ".venv\Scripts\python.exe" (
     echo.
