@@ -208,6 +208,7 @@ textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--
     <div class="wrap">
       <p style="margin:0 0 6px">掲載情報は資料をもとに作成しています。最新の状況・詳細条件はLINEにてお問い合わせください。</p>
       <p style="margin:0">面積・築年数・駅徒歩分数は資料記載値です。現況と異なる場合があります。</p>
+      <p style="margin:14px 0 0"><a href="#" id="toAdmin" style="color:#7d8b9c;font-size:11.5px;opacity:.65">管理者ログイン</a></p>
     </div>
   </footer>
 
@@ -224,6 +225,7 @@ textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--
       <div class="brand">管理画面<small>ADMIN CONSOLE</small></div>
       <div class="spacer"></div>
       <span class="status" id="modeBadge"></span>
+      <button class="btn sm" id="toPublic">ユーザー画面に戻る</button>
       <button class="btn sm" id="btnLogout" hidden>ログアウト</button>
     </div>
   </header>
@@ -295,9 +297,10 @@ textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--
 var CONFIG = {
   /* ⑦ LINE リンク先 */
   LINE_URL: 'https://lin.ee/ucovrzE',
-  /* 標準モード（Wix CMS 未接続時）の管理パスワード。
-     Velo 接続時はサーバ側（Wix シークレットマネージャー）で検証されるため未使用。 */
-  FALLBACK_PASSWORD: 'admin1234',
+  /* 標準モード（Wix CMS 未接続時）だけで使う予備パスワード。
+     Velo 接続時はサーバ側（Wix シークレットマネージャー）で検証されるため使われない。
+     このHTMLは訪問者から読めるため、既定値のままにしないこと。 */
+  FALLBACK_PASSWORD: 'Jmt2sB9fxDWbreIysO',
   BRIDGE_TIMEOUT_MS: 4000,
   /* pdf.js の配信元。日本語（CIDフォント）PDFの読み取りに cmaps / standard_fonts が必須 */
   PDFJS_BASE: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/'
@@ -978,6 +981,18 @@ function applyMode(mode) {
   document.documentElement.setAttribute('data-mode', mode);
 }
 applyMode(currentMode());
+
+/* 1ページに両画面を置く構成用の切り替え導線。
+   管理画面はパスワードで保護されているため、リンクが見えても操作はできない。 */
+document.getElementById('toAdmin').addEventListener('click', function (e) {
+  e.preventDefault();
+  applyMode('admin');
+  window.scrollTo(0, 0);
+});
+document.getElementById('toPublic').addEventListener('click', function () {
+  applyMode('public');
+  window.scrollTo(0, 0);
+});
 
 /* Velo 側から mode を指定された場合にも対応 */
 window.addEventListener('message', function (ev) {

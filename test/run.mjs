@@ -60,6 +60,9 @@ page.on('pageerror', e => { fail++; console.log('  \x1b[31m✖ JSエラー: ' + 
 await page.goto(BASE);
 await page.waitForFunction(() => !!window.__RE);
 
+const FALLBACK_PW = await page.evaluate(() => window.__RE.CONFIG.FALLBACK_PASSWORD);
+ok('予備パスワードが既定値から変更されている', FALLBACK_PW !== 'admin1234' && FALLBACK_PW.length >= 12);
+
 const houseTxt = fs.readFileSync(path.join(FIX, 'house.txt'), 'utf8');
 const manTxt   = fs.readFileSync(path.join(FIX, 'mansion.txt'), 'utf8');
 const man2Txt  = fs.readFileSync(path.join(FIX, 'mansion2.txt'), 'utf8');
@@ -142,6 +145,36 @@ await pasted.waitForTimeout(300);
 ok('setMode で公開画面に戻せる', await pasted.isVisible('#view-public'));
 await pasted.close();
 
+/* 1ページ構成：ページ内リンクだけで管理画面へ行けること */
+const onepage = await ctx.newPage();
+await onepage.goto(BASE);
+await onepage.waitForFunction(() => !!window.__RE);
+ok('公開画面に管理者ログイン導線がある', await onepage.isVisible('#toAdmin'));
+await onepage.click('#toAdmin');
+await onepage.waitForTimeout(300);
+ok('① リンクから管理画面に切り替わる（1ページ構成）',
+   await onepage.isVisible('#view-admin') && !(await onepage.isVisible('#view-public')));
+ok('① 切り替え後もパスワードで保護されている',
+   await onepage.isVisible('#adminLogin') && !(await onepage.isVisible('#adminBody')));
+await onepage.click('#toPublic');
+await onepage.waitForTimeout(300);
+ok('ユーザー画面に戻れる', await onepage.isVisible('#view-public'));
+/* 実際にログインして掲載まで通るか（1ページ構成の通しフロー） */
+await onepage.click('#toAdmin');
+await onepage.fill('#pw', FALLBACK_PW);
+await onepage.click('#btnLogin');
+await onepage.waitForSelector('#adminBody:not([hidden])', { timeout: 8000 });
+await onepage.setInputFiles('#fileInput', [path.join(FIX, 'mansion2.txt')]);
+await onepage.waitForFunction(() => document.querySelectorAll('#reviewArea .review').length === 1, { timeout: 15000 });
+await onepage.click('#reviewArea [data-act="publish"]');
+await onepage.waitForTimeout(600);
+await onepage.click('#toPublic');
+await onepage.waitForTimeout(300);
+ok('1ページ構成でも掲載がユーザー画面に反映される',
+   (await onepage.$$('#pubGrid .card')).length >= 1);
+await onepage.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+await onepage.close();
+
 /* =========================================================
    3. ② D&D → ③④ → 掲載 の通しフロー（PDF）
    ========================================================= */
@@ -151,7 +184,7 @@ await admin.click('#btnLogin');
 await admin.waitForTimeout(300);
 ok('誤ったパスワードは拒否', await admin.isVisible('#adminLogin'));
 
-await admin.fill('#pw', 'admin1234');
+await admin.fill('#pw', FALLBACK_PW);
 await admin.click('#btnLogin');
 await admin.waitForSelector('#adminBody:not([hidden])', { timeout: 8000 });
 ok('ログイン成功で管理画面本体が表示', await admin.isVisible('#dz'));
