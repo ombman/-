@@ -30,7 +30,9 @@ const server = http.createServer((req, res) => {
   res.end(fs.readFileSync(p));
 });
 await new Promise(r => server.listen(8123, '127.0.0.1', r));
-const BASE = 'http://127.0.0.1:8123/index.html';
+const FILE = process.env.WIDGET_FILE || 'index.html';
+const BASE = `http://127.0.0.1:8123/${FILE}`;
+console.log(`対象ファイル: wix-embed/${FILE}`);
 
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
 const ctx = await browser.newContext();
@@ -124,6 +126,21 @@ await admin.goto(BASE + '?mode=admin');
 await admin.waitForFunction(() => !!window.__RE);
 ok('① ?mode=admin で管理画面', await admin.isVisible('#view-admin') && !(await admin.isVisible('#view-public')));
 ok('① 管理画面はパスワードで保護', await admin.isVisible('#adminLogin') && !(await admin.isVisible('#adminBody')));
+
+/* Wix に「HTMLコード」として直接貼り付けた場合は URL クエリが使えないため、
+   Velo ページコードからの setMode メッセージで切り替わることを確認する */
+const pasted = await ctx.newPage();
+await pasted.goto(BASE);            // クエリ無し = 既定はユーザー画面
+await pasted.waitForFunction(() => !!window.__RE);
+ok('クエリ無しならユーザー画面', await pasted.isVisible('#view-public'));
+await pasted.evaluate(() => window.postMessage({ channel: 'reLp', action: 'setMode', payload: 'admin' }, '*'));
+await pasted.waitForTimeout(300);
+ok('① Velo からの setMode で管理画面に切り替わる（貼り付け方式）',
+   await pasted.isVisible('#view-admin') && !(await pasted.isVisible('#view-public')));
+await pasted.evaluate(() => window.postMessage({ channel: 'reLp', action: 'setMode', payload: 'public' }, '*'));
+await pasted.waitForTimeout(300);
+ok('setMode で公開画面に戻せる', await pasted.isVisible('#view-public'));
+await pasted.close();
 
 /* =========================================================
    3. ② D&D → ③④ → 掲載 の通しフロー（PDF）
