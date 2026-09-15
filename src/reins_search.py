@@ -172,106 +172,101 @@ def _click_download(page, targets, timeout_ms) -> None:
       4) それでも駄目なら従来の save_as を試す。
     """
     import time as _t
+    import urllib.request
 
     from browser import DOWNLOAD_DIR
 
     log = get_logger()
     ctx = page.context
-    box: dict[str, Any] = {"d": None}
-    reqs: list[Any] = []
+
+    # 捕捉したダウンロードの (URL, ファイル名) を、捕捉時（＝接続が生きている間）に控える。
+    # 図面は「2分割」等で複数ファイルになることがあるため、すべて集める。
+    found: list[tuple[str, str]] = []
+    seen_urls: set[str] = set()
 
     def _grab(d):
-        if box["d"] is None:
-            box["d"] = d
-
-    def _on_req(r):
         try:
-            reqs.append(r)
+            u = d.url
+            fn = d.suggested_filename
+            if u and u not in seen_urls:
+                seen_urls.add(u)
+                found.append((u, fn or ""))
         except Exception:
             pass
 
-    # ダウンロード＆リクエストを、現在および今後のページで捕捉する
-    ctx.on("page", lambda p: (p.on("download", _grab), p.on("request", _on_req)))
+    ctx.on("page", lambda p: p.on("download", _grab))
     for p in list(ctx.pages):
         try:
             p.on("download", _grab)
-            p.on("request", _on_req)
         except Exception:
             pass
 
-    # メインページで「予約」しつつクリック（閉じられる前に権利を確保）
+    # クリックして最初のダウンロードを確保
     try:
         with page.expect_download(timeout=timeout_ms) as di:
             try:
                 click_target(page, targets, timeout_ms)
             except Exception as exc:
-                log.debug("  ・クリック時の例外（ダウンロード遷移の可能性、継続）: %s", exc)
-        box["d"] = di.value
+                log.debug("  ・クリック時の例外（継続）: %s", exc)
+        _grab(di.value)
     except Exception as exc:
         log.debug("  ・expect_downloadで未捕捉（%s）。ハンドラ捕捉を待ちます。", type(exc).__name__)
-        deadline = _t.time() + 15
-        while box["d"] is None and _t.time() < deadline:
-            live = next((p for p in ctx.pages if not p.is_closed()), None)
-            if live is None:
-                break
-            try:
-                live.wait_for_timeout(300)
-            except Exception:
-                break
 
-    download = box["d"]
-    if download is None:
+    # ログイン中のCookieを、接続が生きている今のうちに取得しておく
+    cookie_header = ""
+    try:
+        cookies = ctx.cookies()
+        reins_cookies = [c for c in cookies if "reins" in (c.get("domain") or "")]
+        use = reins_cookies or cookies
+        cookie_header = "; ".join(f"{c['name']}={c['value']}" for c in use)
+    except Exception as exc:
+        log.debug("Cookie取得に失敗: %s", exc)
+
+    # 追加のダウンロード（2分割など）を数秒待って集める
+    deadline = _t.time() + 8
+    while _t.time() < deadline:
+        live = next((p for p in ctx.pages if not p.is_closed()), None)
+        if live is None:
+            break
+        try:
+            live.wait_for_timeout(500)
+        except Exception:
+            break
+
+    if not found:
         raise StepError(
             "図面のダウンロードを検出できませんでした。"
-            "『一括取得』の押下対象、または取得手順（前段の全選択・図面一括取得）を確認してください。"
+            "『一括取得』の押下対象や前段の手順を確認してください。"
         )
 
-    name = download.suggested_filename or f"zumen_{int(_t.time())}.zip"
-    dest = DOWNLOAD_DIR / name
-    if dest.exists():
-        dest = DOWNLOAD_DIR / f"{dest.stem}_{int(_t.time())}{dest.suffix}"
-
-    dl_url = None
-    try:
-        dl_url = download.url
-    except Exception:
-        dl_url = None
-
-    # 方式A: ログイン中セッションでURLから直接取得（ページ生存に依存しない＝最も確実）
-    if dl_url:
-        matched = None
-        for r in reqs:
-            try:
-                if r.url == dl_url:
-                    matched = r
-                    break
-            except Exception:
-                continue
+    # ブラウザから独立して、Cookie付きでURLから直接ダウンロードして保存する
+    saved = 0
+    for i, (url, fn) in enumerate(found, start=1):
         try:
-            if matched is not None and str(getattr(matched, "method", "GET")).upper() == "POST":
-                ct = "application/x-www-form-urlencoded"
-                try:
-                    ct = matched.headers.get("content-type", ct)
-                except Exception:
-                    pass
-                resp = ctx.request.post(dl_url, data=(matched.post_data or ""),
-                                        headers={"content-type": ct})
-            else:
-                resp = ctx.request.get(dl_url)
-            body = resp.body()
-            if body and len(body) > 200:  # それらしい実体があれば保存
-                with open(dest, "wb") as f:
-                    f.write(body)
-                log.info("図面を保存しました（%dバイト, セッション直取得）: %s", len(body), dest)
-                return
-            log.warning("URL直取得の応答が小さすぎます（%dバイト）。save_asを試します。",
-                        len(body) if body else 0)
+            name = fn or f"zumen_{int(_t.time())}_{i}.pdf"
+            dest = DOWNLOAD_DIR / name
+            if dest.exists():
+                dest = DOWNLOAD_DIR / f"{dest.stem}_{int(_t.time())}_{i}{dest.suffix}"
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "Cookie": cookie_header,
+                    "User-Agent": "Mozilla/5.0",
+                    "Referer": "https://system.reins.jp/",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=180) as r:
+                data = r.read()
+            with open(dest, "wb") as f:
+                f.write(data)
+            log.info("図面を保存しました（%dバイト）: %s", len(data), dest)
+            saved += 1
         except Exception as exc:
-            log.warning("URL直取得に失敗（%s）。save_asを試します。", exc)
+            log.warning("図面の保存に失敗（%s）: %s", url, exc)
 
-    # 方式B: 従来の save_as（ページが生きていれば成功する）
-    download.save_as(str(dest))
-    log.info("図面をダウンロード保存しました（save_as）: %s", dest)
+    if saved == 0:
+        raise StepError("図面ダウンロードURLからの保存にすべて失敗しました。")
+    log.info("図面を %d ファイル、downloads フォルダに保存しました。", saved)
 
 
 def _scroll_into_view(page, targets, timeout_ms) -> None:
