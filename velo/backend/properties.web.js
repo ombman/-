@@ -1,0 +1,122 @@
+/**
+ * Wix Velo バックエンド Web モジュール
+ * 配置先： バックエンド／backend/properties.web.js
+ *
+ * ・物件データ（Properties コレクション）の読み書きを担当します。
+ * ・管理パスワードはサイトのシークレットマネージャーで保管し、ここで検証します。
+ *   （HTML 埋め込み側にパスワードを置かないための構成です）
+ *
+ * 事前準備：
+ *   1) CMS で「Properties」コレクションを作成（フィールドは docs/SETUP-ja.md 参照）
+ *   2) シークレットマネージャーに以下を登録
+ *        adminPassword   … 管理画面のログインパスワード
+ *        adminTokenSalt  … 任意の長いランダム文字列（トークン署名用）
+ */
+import { Permissions, webMethod } from 'wix-web-module';
+import wixData from 'wix-data';
+import { elevate } from 'wix-auth';
+import { getSecret } from 'wix-secrets-backend';
+import { createHmac } from 'crypto';
+
+const COLLECTION = 'Properties';
+const TOKEN_TTL_MS = 8 * 60 * 60 * 1000; // 8時間
+
+const elevatedInsert = elevate(wixData.insert);
+const elevatedRemove = elevate(wixData.remove);
+const elevatedQuery = elevate(wixData.query(COLLECTION).find);
+
+/* ---------- トークン ---------- */
+async function salt() {
+  return await getSecret('adminTokenSalt');
+}
+function sign(payload, key) {
+  return createHmac('sha256', key).update(payload).digest('hex');
+}
+async function issueToken() {
+  const exp = String(Date.now() + TOKEN_TTL_MS);
+  return `${exp}.${sign(exp, await salt())}`;
+}
+async function assertToken(token) {
+  if (typeof token !== 'string' || token.indexOf('.') < 0) throw new Error('認証が必要です');
+  const [exp, sig] = token.split('.');
+  if (sign(exp, await salt()) !== sig) throw new Error('認証が無効です');
+  if (Number(exp) < Date.now()) throw new Error('セッションの有効期限が切れました。再度ログインしてください');
+}
+
+/* ---------- 公開（誰でも読める） ---------- */
+export const listProperties = webMethod(Permissions.Anyone, async () => {
+  const res = await wixData.query(COLLECTION)
+    .descending('_createdDate')
+    .limit(100)
+    .find();
+  return res.items.map(toClient);
+});
+
+/* ---------- 管理 ---------- */
+export const login = webMethod(Permissions.Anyone, async (password) => {
+  const expected = await getSecret('adminPassword');
+  if (!password || password !== expected) throw new Error('パスワードが違います');
+  return { token: await issueToken() };
+});
+
+export const saveProperty = webMethod(Permissions.Anyone, async (token, record) => {
+  await assertToken(token);
+  const saved = await elevatedInsert(COLLECTION, sanitize(record));
+  return toClient(saved);
+});
+
+export const removeProperty = webMethod(Permissions.Anyone, async (token, id) => {
+  await assertToken(token);
+  await elevatedRemove(COLLECTION, id);
+  return true;
+});
+
+/* ---------- 変換 ---------- */
+const numOrNull = (v) => (v === null || v === undefined || v === '' || isNaN(Number(v)) ? null : Number(v));
+const strOrNull = (v) => (v === null || v === undefined || v === '' ? null : String(v).slice(0, 200));
+
+/**
+ * ④ 情報元の削除は HTML 側で実施済みですが、保存時にもサーバ側で最終確認します。
+ *    （電話番号・メール・URL・法人格を含む値は保存しません）
+ */
+const LEAK = /(?:[0-9]{2,4}-[0-9]{2,4}-[0-9]{3,4})|@|https?:\/\/|株式会社|有限会社|㈱|㈲/;
+function safeText(v) {
+  const s = strOrNull(v);
+  if (s && LEAK.test(s)) return null;
+  return s;
+}
+
+function sanitize(r) {
+  const type = r && r.type === 'mansion' ? 'mansion' : 'house';
+  return {
+    title: safeText(r.name) || '物件情報',
+    propertyType: type,
+    priceMan: numOrNull(r.priceMan),
+    walkMin: numOrNull(r.walkMin),
+    station: safeText(r.station),
+    ageYears: numOrNull(r.ageYears),
+    builtLabel: safeText(r.builtLabel),
+    // ※1 種別ごとの項目
+    floorArea: type === 'house' ? numOrNull(r.floorArea) : null,
+    ownArea: type === 'mansion' ? numOrNull(r.ownArea) : null,
+    ownShare: type === 'mansion' ? safeText(r.share) : null,
+    sourceFile: safeText(r.sourceFile)
+  };
+}
+
+function toClient(item) {
+  return {
+    _id: item._id,
+    name: item.title,
+    type: item.propertyType,
+    priceMan: item.priceMan ?? null,
+    walkMin: item.walkMin ?? null,
+    station: item.station ?? null,
+    ageYears: item.ageYears ?? null,
+    builtLabel: item.builtLabel ?? null,
+    floorArea: item.floorArea ?? null,
+    ownArea: item.ownArea ?? null,
+    share: item.ownShare ?? null,
+    createdAt: item._createdDate
+  };
+}

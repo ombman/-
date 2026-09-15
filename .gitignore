@@ -1,0 +1,6 @@
+node_modules/
+test/fixtures/*.pdf
+test/fixtures/empty.txt
+test/shot-*.png
+test/dbg.mjs
+test/vendor/

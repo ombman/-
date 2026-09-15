@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>不動産物件紹介 LP</title>
+<style>
+/* ===== ⑤ フォント指定: Meiryo UI ===== */
+:root{
+  --font: "Meiryo UI", "メイリオ", Meiryo, "Hiragino Kaku Gothic ProN",
+          "Yu Gothic UI", "Noto Sans JP", system-ui, sans-serif;
+  --ink:#1c2430; --sub:#5d6b7d; --line:#dfe5ec; --bg:#f5f7fa; --card:#fff;
+  --accent:#1f5f8b; --accent-d:#17496b; --line-green:#06c755; --warn:#b4532a;
+  --radius:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--font);
+  color:var(--ink); background:var(--bg);
+  font-size:15px; line-height:1.75;
+  -webkit-text-size-adjust:100%;
+}
+button,input,textarea,select{font-family:var(--font);font-size:inherit;color:inherit}
+img{max-width:100%}
+[hidden]{display:none!important}
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+
+/* ===== ヘッダー ===== */
+header.site{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30}
+header.site .wrap{display:flex;align-items:center;gap:12px;min-height:60px;flex-wrap:wrap}
+.brand{font-weight:700;font-size:17px;letter-spacing:.02em}
+.brand small{display:block;font-weight:400;font-size:11px;color:var(--sub);letter-spacing:.06em}
+.spacer{flex:1}
+
+/* ===== ボタン ===== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:1px solid var(--line);background:var(--card);color:var(--ink);
+  padding:9px 16px;border-radius:999px;cursor:pointer;text-decoration:none;
+  font-size:14px;font-weight:700;transition:.15s;white-space:nowrap}
+.btn:hover{background:#eef2f6}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-d)}
+.btn.danger{color:var(--warn);border-color:#e8cdc2}
+.btn.sm{padding:5px 12px;font-size:12.5px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ⑥⑦ LINE ボタン */
+.btn-line{background:var(--line-green);border-color:var(--line-green);color:#fff}
+.btn-line:hover{background:#05ad4b;border-color:#05ad4b}
+.btn-line .ico{width:19px;height:19px;flex:none}
+.line-float{position:fixed;right:16px;bottom:16px;z-index:60;
+  box-shadow:0 6px 22px rgba(6,199,85,.42);padding:13px 22px;font-size:15px;
+  bottom:calc(16px + env(safe-area-inset-bottom,0px))}
+
+/* ===== ヒーロー ===== */
+.hero{background:linear-gradient(135deg,#1f5f8b,#123c5c);color:#fff;padding:52px 0 44px}
+.hero h1{margin:0 0 12px;font-size:30px;line-height:1.45;letter-spacing:.01em}
+.hero p{margin:0 0 22px;font-size:15px;opacity:.9;max-width:44em}
+.hero .cta{display:flex;gap:12px;flex-wrap:wrap}
+@media(max-width:600px){.hero{padding:36px 0 32px}.hero h1{font-size:22px}}
+
+/* ===== 絞り込み ===== */
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:26px 0 14px}
+.toolbar select,.toolbar input{padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.count{color:var(--sub);font-size:13px}
+
+/* ===== 物件カード ===== */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px;padding-bottom:28px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+  display:flex;flex-direction:column;transition:.15s}
+.card:hover{box-shadow:0 8px 24px rgba(28,36,48,.09);transform:translateY(-2px)}
+.card .top{padding:14px 16px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tag{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;letter-spacing:.04em}
+.tag.house{background:#eaf3ec;color:#2f6b43}
+.tag.mansion{background:#e9f0f8;color:#25567f}
+.tag.unknown{background:#f0f0f0;color:#666}
+.card h3{margin:8px 16px 2px;font-size:16px;line-height:1.5}
+.price{margin:2px 16px 10px;font-size:25px;font-weight:700;color:var(--accent);letter-spacing:.01em}
+.price small{font-size:13px;font-weight:700;margin-left:2px}
+.price .na{font-size:15px;color:var(--sub)}
+.specs{list-style:none;margin:0;padding:0 16px 14px;border-top:1px solid var(--line);padding-top:12px}
+.specs li{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13.5px;border-bottom:1px dotted #eceff3}
+.specs li:last-child{border-bottom:0}
+.specs .k{color:var(--sub);flex:none}
+.specs .v{font-weight:700;text-align:right}
+.specs .v.na{font-weight:400;color:#9aa6b4}
+.card .foot{margin-top:auto;padding:0 16px 16px}
+.card .foot .btn-line{width:100%}
+.note{font-size:11.5px;color:var(--sub);padding:0 16px 12px;margin:0}
+
+.empty{background:var(--card);border:1px dashed var(--line);border-radius:var(--radius);
+  padding:46px 20px;text-align:center;color:var(--sub)}
+
+/* ===== フッター ===== */
+footer.site{background:#111a24;color:#aab6c4;padding:30px 0;margin-top:30px;font-size:12.5px}
+footer.site a{color:#cfe0ef}
+
+/* ===== ① 管理画面 ===== */
+.admin{padding:26px 0 80px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin-bottom:18px}
+.panel h2{margin:0 0 4px;font-size:17px}
+.panel .desc{margin:0 0 16px;color:var(--sub);font-size:13px}
+.login{max-width:420px;margin:60px auto}
+.login input{width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;margin-bottom:12px}
+
+/* ② ドラッグ＆ドロップ枠 */
+.dropzone{border:2.5px dashed #b9c6d4;border-radius:var(--radius);background:#f8fafc;
+  padding:44px 20px;text-align:center;cursor:pointer;transition:.15s;outline:none}
+.dropzone:hover,.dropzone:focus-visible{border-color:var(--accent);background:#eff5fa}
+.dropzone.over{border-color:var(--accent);background:#e4eef7;transform:scale(1.01)}
+.dropzone .big{font-size:17px;font-weight:700;margin-bottom:6px}
+.dropzone .sm{font-size:12.5px;color:var(--sub)}
+.dropzone .icon{font-size:36px;line-height:1;margin-bottom:10px}
+
+.log{margin-top:14px;font-size:13px}
+.log div{padding:6px 10px;border-radius:8px;margin-bottom:6px;background:#f3f6f9}
+.log div.ok{background:#eaf5ee;color:#2f6b43}
+.log div.err{background:#fbeee8;color:var(--warn)}
+
+/* 抽出結果の確認テーブル */
+.review{margin-top:16px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.review .hd{background:#f3f6f9;padding:10px 14px;font-weight:700;font-size:14px;
+  display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.fields{padding:14px}
+.fields .row{display:grid;grid-template-columns:130px 1fr;gap:10px;align-items:center;margin-bottom:9px}
+.fields .row label{font-size:13px;color:var(--sub)}
+.fields .row input,.fields .row select{padding:8px 11px;border:1px solid var(--line);border-radius:9px;width:100%}
+.fields .row input.miss{border-color:#e0b9a8;background:#fdf6f3}
+@media(max-width:560px){.fields .row{grid-template-columns:1fr;gap:3px}}
+
+.redact{margin:12px 14px 0;background:#fdf6f3;border:1px solid #f0ddd3;border-radius:10px;padding:11px 13px;font-size:12.5px;color:#7a4a33}
+.redact b{color:var(--warn)}
+.redact ul{margin:6px 0 0;padding-left:18px}
+.raw{margin:12px 14px 14px}
+.raw summary{cursor:pointer;font-size:12.5px;color:var(--sub)}
+.raw pre{white-space:pre-wrap;word-break:break-all;background:#f7f9fb;border:1px solid var(--line);
+  border-radius:9px;padding:11px;max-height:260px;overflow:auto;font-size:12px;
+  font-family:"Meiryo UI",Meiryo,monospace;margin:8px 0 0}
+
+table.list{width:100%;border-collapse:collapse;font-size:13.5px}
+table.list th,table.list td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left}
+table.list th{background:#f3f6f9;color:var(--sub);font-size:12.5px;white-space:nowrap}
+table.list td.num{text-align:right;white-space:nowrap}
+.tblwrap{overflow-x:auto}
+
+.status{font-size:12px;color:var(--sub);padding:7px 12px;background:#f3f6f9;border-radius:9px;display:inline-block}
+.status.warnmode{background:#fdf6f3;color:#7a4a33}
+textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;resize:vertical}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:var(--accent);
+  border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<!-- ============ ① ユーザー画面（一般公開） ============ -->
+<div id="view-public">
+  <header class="site">
+    <div class="wrap">
+      <div class="brand">おすすめ物件のご紹介<small>REAL ESTATE SELECTION</small></div>
+      <div class="spacer"></div>
+      <a class="btn btn-line sm" id="lineHeader" href="#" target="_blank" rel="noopener">
+        <svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.5 2 2 5.7 2 10.2c0 4 3.6 7.4 8.4 8.1.3.07.8.22.9.5.1.26.07.66.03.92l-.14.86c-.04.26-.2 1 .88.55 1.09-.46 5.86-3.45 8-5.9C21.4 13.6 22 12 22 10.2 22 5.7 17.5 2 12 2M8.1 13.2H6.2c-.28 0-.5-.23-.5-.5V8.9c0-.28.22-.5.5-.5s.5.22.5.5v3.3h1.4c.28 0 .5.22.5.5s-.22.5-.5.5m2.2-.5c0 .27-.23.5-.5.5s-.5-.23-.5-.5V8.9c0-.28.22-.5.5-.5s.5.22.5.5zm4.6 0c0 .22-.14.41-.35.48a.5.5 0 0 1-.56-.18l-1.95-2.65v2.35c0 .27-.23.5-.5.5a.5.5 0 0 1-.5-.5V8.9c0-.21.14-.4.34-.47a.5.5 0 0 1 .56.18l1.96 2.66V8.9c0-.28.22-.5.5-.5s.5.22.5.5zm3.1-2.4c.28 0 .5.22.5.5s-.22.5-.5.5h-1.4v.9h1.4c.28 0 .5.22.5.5s-.22.5-.5.5h-1.9a.5.5 0 0 1-.5-.5V8.9c0-.28.22-.5.5-.5h1.9c.28 0 .5.22.5.5s-.22.5-.5.5h-1.4v.9z"/></svg>
+        LINEで問い合わせ
+      </a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="wrap">
+      <h1>気になる物件は、<br>LINEでかんたんお問い合わせ。</h1>
+      <p>厳選した戸建・マンション（区分所有）の情報を掲載しています。価格・駅徒歩・築年数・面積など、判断に必要な条件をひと目で比較できます。</p>
+      <div class="cta">
+        <a class="btn btn-line line-hero" href="#" target="_blank" rel="noopener">
+          <svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.5 2 2 5.7 2 10.2c0 4 3.6 7.4 8.4 8.1.3.07.8.22.9.5.1.26.07.66.03.92l-.14.86c-.04.26-.2 1 .88.55 1.09-.46 5.86-3.45 8-5.9C21.4 13.6 22 12 22 10.2 22 5.7 17.5 2 12 2"/></svg>
+          LINEで問い合わせる
+        </a>
+        <a class="btn" href="#list">物件一覧を見る</a>
+      </div>
+    </div>
+  </section>
+
+  <main class="wrap" id="list">
+    <div class="toolbar">
+      <select id="fType" aria-label="種別で絞り込み">
+        <option value="">すべての種別</option>
+        <option value="house">戸建</option>
+        <option value="mansion">マンション／区分所有</option>
+      </select>
+      <select id="fSort" aria-label="並び替え">
+        <option value="new">新着順</option>
+        <option value="priceAsc">価格が安い順</option>
+        <option value="priceDesc">価格が高い順</option>
+        <option value="walkAsc">駅から近い順</option>
+        <option value="ageAsc">築年数が浅い順</option>
+      </select>
+      <span class="spacer"></span>
+      <span class="count" id="pubCount"></span>
+    </div>
+    <div class="grid" id="pubGrid"></div>
+    <div class="empty" id="pubEmpty" hidden>
+      現在、掲載中の物件はありません。<br>新着情報はLINEでお知らせします。
+    </div>
+  </main>
+
+  <footer class="site">
+    <div class="wrap">
+      <p style="margin:0 0 6px">掲載情報は資料をもとに作成しています。最新の状況・詳細条件はLINEにてお問い合わせください。</p>
+      <p style="margin:0">面積・築年数・駅徒歩分数は資料記載値です。現況と異なる場合があります。</p>
+    </div>
+  </footer>
+
+  <a class="btn btn-line line-float" href="#" target="_blank" rel="noopener">
+    <svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.5 2 2 5.7 2 10.2c0 4 3.6 7.4 8.4 8.1.3.07.8.22.9.5.1.26.07.66.03.92l-.14.86c-.04.26-.2 1 .88.55 1.09-.46 5.86-3.45 8-5.9C21.4 13.6 22 12 22 10.2 22 5.7 17.5 2 12 2"/></svg>
+    LINEで問い合わせ
+  </a>
+</div>
+
+<!-- ============ ① 管理画面（管理者専用） ============ -->
+<div id="view-admin" hidden>
+  <header class="site">
+    <div class="wrap">
+      <div class="brand">管理画面<small>ADMIN CONSOLE</small></div>
+      <div class="spacer"></div>
+      <span class="status" id="modeBadge"></span>
+      <button class="btn sm" id="btnLogout" hidden>ログアウト</button>
+    </div>
+  </header>
+
+  <!-- ログイン -->
+  <div class="wrap login" id="adminLogin">
+    <div class="panel">
+      <h2>管理者ログイン</h2>
+      <p class="desc">管理用パスワードを入力してください。</p>
+      <input type="password" id="pw" placeholder="管理用パスワード" autocomplete="current-password">
+      <button class="btn primary" id="btnLogin" style="width:100%">ログイン</button>
+      <div class="log" id="loginLog"></div>
+    </div>
+  </div>
+
+  <!-- 本体 -->
+  <div class="wrap admin" id="adminBody" hidden>
+
+    <!-- ② ドラッグ＆ドロップ枠 -->
+    <div class="panel">
+      <h2>② 資料のドラッグ＆ドロップ登録</h2>
+      <p class="desc">PDF／テキストの物件資料をこの枠に落とすと、<b>③</b>価格・駅徒歩・築年数・面積などを自動で読み取り、<b>④</b>電話番号・会社名・担当者名などの情報元を自動削除します。</p>
+      <div class="dropzone" id="dz" tabindex="0" role="button" aria-label="資料をドラッグ＆ドロップ">
+        <div class="icon">📄</div>
+        <div class="big">ここに資料をドラッグ＆ドロップ</div>
+        <div class="sm">またはクリックしてファイルを選択 ／ 対応形式：PDF（テキスト付）・TXT・CSV ／ 複数同時可</div>
+      </div>
+      <input type="file" id="fileInput" multiple accept=".pdf,.txt,.csv,.md,application/pdf,text/plain" hidden>
+      <div class="log" id="dropLog"></div>
+    </div>
+
+    <!-- 抽出結果レビュー -->
+    <div id="reviewArea"></div>
+
+    <!-- ④ 追加の削除ワード -->
+    <div class="panel">
+      <h2>④ 追加で削除するワード</h2>
+      <p class="desc">自社名・支店名・担当者名など、自動検出に加えて必ず削除したい語を1行に1つ入力してください（読み取り時に自動で［削除済み］に置換されます）。</p>
+      <textarea class="ng" id="ngWords" placeholder="例）&#10;サンプル不動産&#10;山田太郎&#10;新宿支店"></textarea>
+      <div style="margin-top:10px"><button class="btn sm" id="btnSaveNg">保存</button> <span class="count" id="ngSaved"></span></div>
+    </div>
+
+    <!-- 掲載中一覧 -->
+    <div class="panel">
+      <h2>掲載中の物件</h2>
+      <p class="desc">ユーザー画面に表示されている物件の一覧です。</p>
+      <div class="tblwrap">
+        <table class="list">
+          <thead><tr>
+            <th>種別</th><th>物件名</th><th>価格</th><th>駅徒歩</th><th>築年数</th><th>面積</th><th>持分</th><th></th>
+          </tr></thead>
+          <tbody id="admRows"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="admEmpty" hidden style="margin-top:14px">まだ物件が登録されていません。</div>
+    </div>
+  </div>
+</div>
+
+<!-- =============================================================
+     pdf.js（テキスト抽出用）
+     ============================================================= -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+/* =================================================================
+   0. 設定
+   ================================================================= */
+var CONFIG = {
+  /* ⑦ LINE リンク先 */
+  LINE_URL: 'https://lin.ee/ucovrzE',
+  /* 標準モード（Wix CMS 未接続時）の管理パスワード。
+     Velo 接続時はサーバ側（Wix シークレットマネージャー）で検証されるため未使用。 */
+  FALLBACK_PASSWORD: 'admin1234',
+  BRIDGE_TIMEOUT_MS: 4000,
+  /* pdf.js の配信元。日本語（CIDフォント）PDFの読み取りに cmaps / standard_fonts が必須 */
+  PDFJS_BASE: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/'
+};
+
+/* ⑥⑦ すべての LINE ボタンにリンクを適用 */
+Array.prototype.forEach.call(document.querySelectorAll('.btn-line'), function (a) {
+  a.href = CONFIG.LINE_URL;
+});
+
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = CONFIG.PDFJS_BASE + 'pdf.worker.min.js';
+}
+
+/* =================================================================
+   1. 文字列ユーティリティ
+   ================================================================= */
+function zen2han(s) {
+  return String(s == null ? '' : s)
+    .replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+    .replace(/[Ａ-Ｚａ-ｚ]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+    .replace(/[，]/g, ',').replace(/[．]/g, '.').replace(/[：]/g, ':')
+    .replace(/[（]/g, '(').replace(/[）]/g, ')')
+    .replace(/[−ー―‐－]/g, '-')
+    .replace(/　/g, ' ');
+}
+function num(s) {
+  if (s == null) return null;
+  var v = parseFloat(zen2han(s).replace(/,/g, ''));
+  return isFinite(v) ? v : null;
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+/* =================================================================
+   2. ④ 情報元の削除（電話番号・会社名・担当者名 など）
+   ================================================================= */
+var MASK = '［削除済み］';
+
+var REDACT_RULES = [
+  { label: 'メールアドレス', re: /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g },
+  { label: 'URL',           re: /(?:https?:\/\/|www\.)[^\s　"'<>））]+/g },
+  { label: '電話・FAX番号',  re: /(?:TEL|Tel|tel|FAX|Fax|fax|ＴＥＬ|ＦＡＸ|電話番号|電話|℡|☎|フリーダイヤル)\s*[:：]?\s*[0-9０-９][0-9０-９\-－ー\(\)（）\s]{6,}/g },
+  { label: '電話・FAX番号',  re: /0[0-9０-９]{1,4}[\-－ー\(（\s][0-9０-９]{1,4}[\-－ー\)）\s][0-9０-９]{3,4}/g },
+  { label: '電話・FAX番号',  re: /0(?:120|800)[\-－ー\s]?[0-9０-９]{2,3}[\-－ー\s]?[0-9０-９]{3,4}/g },
+  { label: '宅建業免許番号',  re: /(?:国土交通大臣|[^\s　]{2,4}(?:都|道|府|県)知事)\s*[\(（]?\s*[0-9０-９]{1,2}\s*[\)）]?\s*第?\s*[0-9０-９]{1,6}\s*号/g },
+  { label: '会社名',        re: /(?:株式会社|㈱|有限会社|㈲|合同会社|合資会社|合名会社)\s*[^\s　、。，,\n\/／|｜]{0,20}/g },
+  { label: '会社名',        re: /[^\s　、。，,\n\/／|｜]{1,20}(?:株式会社|㈱|有限会社|㈲|合同会社)/g },
+  { label: '会社名',        re: /[^\s　、。，,\n\/／|｜:：]{1,14}(?:不動産販売|不動産流通|不動産|住宅販売|ホームズ|ハウジング|リアルエステート|エステート|地所|商事|ホーム)(?=\s|$|[、。，,\n\/／|｜])/g },
+  { label: '担当者・窓口',   re: /(?:担当者名|担当者|ご担当|担当|窓口|取扱店|取扱主任者|宅地建物取引士|宅建士|問合せ先|お問合せ先|お問い合わせ先|お問合わせ先|媒介業者|元付|客付)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{1,20}/g },
+  { label: '所在地（事業者）', re: /(?:本社|支店|営業所|店舗)\s*[:：]?\s*[^\n]{0,30}/g }
+];
+
+function redact(text, extraWords) {
+  var hits = {};
+  var out = String(text == null ? '' : text);
+
+  (extraWords || []).forEach(function (w) {
+    w = String(w).trim();
+    if (w.length < 2) return;
+    var re = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+    if (re.test(out)) { hits['指定ワード'] = (hits['指定ワード'] || 0) + (out.match(re) || []).length; }
+    out = out.replace(re, MASK);
+  });
+
+  REDACT_RULES.forEach(function (rule) {
+    out = out.replace(rule.re, function (m) {
+      if (m.indexOf(MASK) !== -1) return m;
+      hits[rule.label] = (hits[rule.label] || 0) + 1;
+      return MASK;
+    });
+  });
+
+  out = out.replace(new RegExp('(?:' + MASK.replace(/[\[\]]/g, '\\$&') + '\\s*){2,}', 'g'), MASK);
+  return { text: out, hits: hits, total: Object.keys(hits).reduce(function (a, k) { return a + hits[k]; }, 0) };
+}
+
+/* =================================================================
+   3. ③ 資料からの情報抽出
+   ================================================================= */
+
+/* 3-1. 種別判定（戸建 / マンション・区分所有） */
+function detectType(t) {
+  var m = 0, h = 0;
+  [[/マンション/g, 3], [/区分所有/g, 4], [/専有面積/g, 4], [/占有面積/g, 4], [/敷地権/g, 3],
+   [/管理費/g, 2], [/修繕積立金/g, 3], [/持分|持ち分/g, 2], [/[0-9０-９]+階部分/g, 2], [/バルコニー面積/g, 2]]
+    .forEach(function (p) { m += (t.match(p[0]) || []).length * p[1]; });
+  [[/戸建/g, 4], [/一戸建/g, 4], [/新築住宅/g, 2], [/延[床べ]/g, 3], [/建物面積/g, 2],
+   [/土地面積/g, 2], [/私道負担/g, 2], [/建ぺい率|建蔽率/g, 2], [/容積率/g, 1]]
+    .forEach(function (p) { h += (t.match(p[0]) || []).length * p[1]; });
+  if (m === 0 && h === 0) return { type: 'unknown', score: 0 };
+  return m >= h ? { type: 'mansion', score: m } : { type: 'house', score: h };
+}
+
+/* 3-2. 価格（万円単位の数値で保持） */
+function pickPrice(t) {
+  var s = zen2han(t);
+  var labeled = /(?:販売価格|物件価格|売出価格|売価格|価格|価額)\s*[:：]?\s*([0-9,\.]*\s*億)?\s*([0-9,\.]+)?\s*(万円|万|円)/;
+  var m = s.match(labeled) || s.match(/([0-9,\.]+\s*億)?\s*([0-9,\.]+)\s*(万円)/);
+  if (!m) return null;
+  var oku = m[1] ? num(m[1].replace('億', '')) : 0;
+  var man = m[2] != null ? num(m[2]) : 0;
+  var unit = m[3];
+  if (unit === '円' && !m[1]) { return man >= 10000 ? Math.round(man / 10000) : null; }
+  var total = (oku || 0) * 10000 + (man || 0);
+  if (!total || total < 10 || total > 2000000) return null;
+  return Math.round(total * 10) / 10;
+}
+function priceLabel(man) {
+  if (man == null) return null;
+  if (man >= 10000) {
+    var o = Math.floor(man / 10000), r = Math.round((man - o * 10000) * 10) / 10;
+    return o + '億' + (r ? r.toLocaleString('ja-JP') + '万円' : '円');
+  }
+  return man.toLocaleString('ja-JP') + '万円';
+}
+
+/* 3-3. 駅からの徒歩分数（＋路線・駅名） */
+/* 「西武池袋線「桜台」駅」→「桜台駅」のように駅名だけを取り出す */
+function cleanStation(raw) {
+  var nm = String(raw || '');
+  var q = nm.match(/[「『\u201c"]([^」』\u201d"]{1,16})[」』\u201d"]?\s*$/);
+  if (q) nm = q[1];
+  nm = nm.replace(/[「」『』\u201c\u201d"]/g, '');
+  nm = nm.split(/線|[:：]|\s|\/|、|・/).pop();
+  nm = nm.replace(/^(?:交通|最寄|最寄り|アクセス|駅)+/, '').trim();
+  if (!nm || nm.length > 12) return null;
+  return nm + '駅';
+}
+function pickWalk(t) {
+  var s = zen2han(t);
+  var best = null, station = null;
+  var re = /([^\s、。,\n\(\)\/|]{1,20}?)\s*駅\s*(?:より|から)?\s*(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g, m;
+  while ((m = re.exec(s))) {
+    var v = num(m[2]);
+    if (v != null && v > 0 && v <= 120 && (best == null || v < best)) {
+      best = v;
+      station = cleanStation(m[1]);
+    }
+  }
+  if (best == null) {
+    var re2 = /(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g;
+    while ((m = re2.exec(s))) {
+      var v2 = num(m[1]);
+      if (v2 != null && v2 > 0 && v2 <= 120 && (best == null || v2 < best)) best = v2;
+    }
+  }
+  if (best == null) return null;
+  return { minutes: best, station: station };
+}
+
+/* 3-4. 築年数（「築○年」／建築年月からの計算／新築） */
+var ERA = { '令和': 2018, '平成': 1988, '昭和': 1925 };
+function pickAge(t) {
+  var s = zen2han(t);
+  var now = new Date(), thisYear = now.getFullYear();
+
+  var m = s.match(/築\s*(?:後)?\s*([0-9]{1,3})\s*年/);
+  if (m) { var a = num(m[1]); if (a != null && a <= 150) return { years: a, built: null }; }
+
+  /* 「新築」の語より建築年月の記載を優先する（例：「新築一戸建」＋「建築年月 平成29年6月」） */
+  var re = /(?:築年月|建築年月|建築年|竣工年月|竣工|完成年月|新築年月|建築時期)\s*[:：]?\s*(令和|平成|昭和)?\s*([0-9]{1,4}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?/;
+  m = s.match(re) || s.match(/(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?\s*築?/);
+  if (m) {
+    var era = m[1], y = m[2] === '元' ? 1 : num(m[2]), mon = m[3] ? num(m[3]) : 1;
+    var year = era ? ERA[era] + y : y;
+    if (year > 1900 && year <= thisYear + 1) {
+      var age = thisYear - year - (now.getMonth() + 1 < mon ? 1 : 0);
+      if (age < 0) age = 0;
+      return { years: age, built: year + '年' + (m[3] ? mon + '月' : '') };
+    }
+  }
+
+  if (/新築|未入居/.test(s)) return { years: 0, built: null };
+  return null;
+}
+
+/* 3-5. 面積 */
+var SQM = '(?:\\u33a1|m2|m\\u00b2|M2|平方\\u30e1\\u30fc\\u30c8\\u30eb|\\u5e73\\u7c73)';
+function pickArea(t, kind) {
+  var s = zen2han(t);
+  var pat = kind === 'floor'
+    ? '(?:\\u5ef6\\s*\\u3079?\\s*\\u5e8a\\s*\\u9762\\u7a4d|\\u5ef6\\u9762\\u7a4d|\\u5efa\\u7269\\u9762\\u7a4d|\\u5e8a\\u9762\\u7a4d)'
+    : '(?:\\u5c02\\u6709\\u9762\\u7a4d|\\u5360\\u6709\\u9762\\u7a4d|\\u5c02\\u6709\\u90e8\\u5206\\u9762\\u7a4d|\\u5c02\\u6709)';
+  var m = s.match(new RegExp(pat + '\\s*[:：]?\\s*(?:\\u7d04)?\\s*([0-9,]+(?:\\.[0-9]+)?)\\s*' + SQM));
+  if (!m) return null;
+  var v = num(m[1]);
+  if (v == null || v <= 0 || v > 100000) return null;
+  return Math.round(v * 100) / 100;
+}
+
+/* 3-6. 持分（区分所有） */
+function pickShare(t) {
+  var s = zen2han(t);
+  var m = s.match(/(?:敷地権(?:の)?割合|敷地権割合|持\s*ち?\s*分(?:割合)?)\s*[:：]?\s*([0-9,]+\s*分の\s*[0-9,]+|[0-9,]+\s*\/\s*[0-9,]+|[0-9]+(?:\.[0-9]+)?\s*%)/);
+  if (!m) return null;
+  return m[1].replace(/\s+/g, '');
+}
+
+/* 3-7. 物件名 */
+function pickName(t, type) {
+  var s = String(t);
+  var m = s.match(/(?:物件名|建物名|マンション名|名称)\s*[:：]?\s*([^\n\r]{1,40})/);
+  if (m) {
+    var v = m[1].trim().replace(/[\s　]{2,}/g, ' ');
+    if (v && v.indexOf(MASK) === -1) return v;
+  }
+  var loc = s.match(/(?:所在地|所在|住所)\s*[:：]?\s*([^\n\r]{1,40})/);
+  if (loc && loc[1].indexOf(MASK) === -1) {
+    return loc[1].trim() + 'の' + (type === 'mansion' ? 'マンション' : type === 'house' ? '戸建' : '物件');
+  }
+  return null;
+}
+
+/* 3-8. 抽出メイン（④削除後のテキストに対して実行） */
+function extract(rawText, extraWords) {
+  var r = redact(rawText, extraWords);
+  var t = r.text;
+  var d = detectType(t);
+  var type = d.type;
+  var walk = pickWalk(t);
+  var age = pickAge(t);
+
+  var rec = {
+    type: type,
+    name: pickName(t, type),
+    priceMan: pickPrice(t),
+    walkMin: walk ? walk.minutes : null,
+    station: walk ? walk.station : null,
+    ageYears: age ? age.years : null,
+    builtLabel: age ? age.built : null,
+    floorArea: null,   /* 戸建：延床面積 */
+    ownArea: null,     /* 区分：専有（占有）面積 */
+    share: null        /* 区分：持分 */
+  };
+
+  /* ※1 の仕様どおり、種別ごとに読み取る項目を切り替える */
+  if (type === 'mansion') {
+    rec.ownArea = pickArea(t, 'own');
+    rec.share = pickShare(t);
+  } else if (type === 'house') {
+    rec.floorArea = pickArea(t, 'floor');
+  } else {
+    rec.floorArea = pickArea(t, 'floor');
+    rec.ownArea = pickArea(t, 'own');
+    rec.share = pickShare(t);
+    if (rec.ownArea != null || rec.share != null) rec.type = 'mansion';
+    else if (rec.floorArea != null) rec.type = 'house';
+  }
+
+  return { record: rec, redaction: r, cleanText: t };
+}
+
+/* 種別ごとの必須項目（※1） */
+function requiredKeys(type) {
+  return type === 'mansion'
+    ? ['priceMan', 'walkMin', 'ageYears', 'ownArea', 'share']
+    : ['priceMan', 'walkMin', 'ageYears', 'floorArea'];
+}
+var FIELD_LABEL = {
+  priceMan: '価格（万円）', walkMin: '駅からの徒歩分数（分）', ageYears: '築年数（年）',
+  floorArea: '延床面積（㎡）', ownArea: '専有面積（㎡）', share: '持分'
+};
+
+/* =================================================================
+   4. ファイル読み込み（PDF / テキスト）
+   ================================================================= */
+function readTextFile(file) {
+  return new Promise(function (res, rej) {
+    var fr = new FileReader();
+    fr.onload = function () { res(String(fr.result || '')); };
+    fr.onerror = function () { rej(new Error('ファイルを読み込めませんでした')); };
+    fr.readAsText(file, 'utf-8');
+  });
+}
+function readPdfFile(file) {
+  if (!window.pdfjsLib) return Promise.reject(new Error('PDF読取ライブラリを読み込めませんでした'));
+  return file.arrayBuffer()
+    .then(function (buf) {
+      return pdfjsLib.getDocument({
+        data: buf,
+        /* 日本語資料は Adobe-Japan1 等の CID フォントを使うため CMap の指定が必要 */
+        cMapUrl: CONFIG.PDFJS_BASE + 'cmaps/',
+        cMapPacked: true,
+        standardFontDataUrl: CONFIG.PDFJS_BASE + 'standard_fonts/'
+      }).promise;
+    })
+    .then(function (pdf) {
+      var jobs = [];
+      for (var i = 1; i <= pdf.numPages; i++) {
+        jobs.push(pdf.getPage(i).then(function (p) { return p.getTextContent(); })
+          .then(function (c) {
+            var line = '', out = [], lastY = null;
+            c.items.forEach(function (it) {
+              var y = it.transform ? Math.round(it.transform[5]) : null;
+              if (lastY !== null && y !== null && Math.abs(y - lastY) > 3) { out.push(line); line = ''; }
+              line += it.str; lastY = y;
+              if (it.hasEOL) { out.push(line); line = ''; lastY = null; }
+            });
+            if (line) out.push(line);
+            return out.join('\n');
+          }));
+      }
+      return Promise.all(jobs).then(function (pages) { return pages.join('\n'); });
+    });
+}
+function readAny(file) {
+  var n = (file.name || '').toLowerCase();
+  if (n.endsWith('.pdf') || file.type === 'application/pdf') return readPdfFile(file);
+  if (/\.(txt|csv|md|tsv|json)$/.test(n) || /^text\//.test(file.type || '')) return readTextFile(file);
+  return Promise.reject(new Error('未対応の形式です（PDF・TXT・CSVに対応。画像/スキャンPDFは読み取れません）'));
+}
+
+/* =================================================================
+   5. Wix（Velo）ブリッジ ／ 未接続時は localStorage
+   ================================================================= */
+var Bridge = (function () {
+  var seq = 0, pending = {}, connected = null;
+
+  window.addEventListener('message', function (ev) {
+    var d = ev.data;
+    if (!d || typeof d !== 'object' || d.channel !== 'reLp') return;
+    if (d.rid && pending[d.rid]) { pending[d.rid](d); delete pending[d.rid]; }
+  });
+
+  function call(action, payload) {
+    return new Promise(function (resolve) {
+      if (window.parent === window) return resolve(null);
+      var rid = 'r' + (++seq) + '_' + Date.now();
+      var done = false;
+      pending[rid] = function (d) { done = true; connected = true; resolve(d); };
+      try { window.parent.postMessage({ channel: 'reLp', rid: rid, action: action, payload: payload }, '*'); }
+      catch (e) { return resolve(null); }
+      setTimeout(function () {
+        if (!done) { delete pending[rid]; if (connected === null) connected = false; resolve(null); }
+      }, CONFIG.BRIDGE_TIMEOUT_MS);
+    });
+  }
+  return { call: call, isConnected: function () { return connected === true; } };
+})();
+
+var LS_KEY = 'reLp.properties.v1';
+var LS_NG = 'reLp.ngwords.v1';
+function lsRead() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch (e) { return []; } }
+function lsWrite(a) { try { localStorage.setItem(LS_KEY, JSON.stringify(a)); } catch (e) {} }
+
+var Store = {
+  mode: 'local',
+  list: function () {
+    return Bridge.call('list').then(function (r) {
+      if (r && r.ok) { Store.mode = 'wix'; return r.items || []; }
+      Store.mode = 'local'; return lsRead();
+    });
+  },
+  save: function (rec, token) {
+    return Bridge.call('save', { record: rec, token: token }).then(function (r) {
+      if (r && r.ok) { Store.mode = 'wix'; return r.item; }
+      if (r && !r.ok) throw new Error(r.error || '保存に失敗しました');
+      Store.mode = 'local';
+      var a = lsRead();
+      rec._id = 'loc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+      rec.createdAt = new Date().toISOString();
+      a.unshift(rec); lsWrite(a); return rec;
+    });
+  },
+  remove: function (id, token) {
+    return Bridge.call('remove', { id: id, token: token }).then(function (r) {
+      if (r && r.ok) { Store.mode = 'wix'; return true; }
+      if (r && !r.ok) throw new Error(r.error || '削除に失敗しました');
+      lsWrite(lsRead().filter(function (x) { return x._id !== id; })); return true;
+    });
+  },
+  login: function (pw) {
+    return Bridge.call('login', { password: pw }).then(function (r) {
+      if (r && r.ok) { Store.mode = 'wix'; return { ok: true, token: r.token }; }
+      if (r && !r.ok) return { ok: false, error: r.error || 'パスワードが違います' };
+      Store.mode = 'local';
+      return pw === CONFIG.FALLBACK_PASSWORD
+        ? { ok: true, token: 'local' }
+        : { ok: false, error: 'パスワードが違います' };
+    });
+  }
+};
+
+/* =================================================================
+   6. ユーザー画面の描画
+   ================================================================= */
+var LINE_SVG = '<svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.5 2 2 5.7 2 10.2c0 4 3.6 7.4 8.4 8.1.3.07.8.22.9.5.1.26.07.66.03.92l-.14.86c-.04.26-.2 1 .88.55 1.09-.46 5.86-3.45 8-5.9C21.4 13.6 22 12 22 10.2 22 5.7 17.5 2 12 2"/></svg>';
+var TYPE_LABEL = { house: '戸建', mansion: 'マンション／区分所有', unknown: '種別未判定' };
+var items = [];
+
+function specRow(k, v, unit) {
+  var has = v !== null && v !== undefined && v !== '';
+  return '<li><span class="k">' + esc(k) + '</span><span class="v' + (has ? '' : ' na') + '">' +
+    (has ? esc(v) + (unit || '') : '資料に記載なし') + '</span></li>';
+}
+function cardHtml(p) {
+  var t = p.type === 'mansion' ? 'mansion' : p.type === 'house' ? 'house' : 'unknown';
+  var specs = '';
+  specs += specRow('価格', priceLabel(p.priceMan));
+  specs += specRow('駅からの徒歩', p.walkMin != null ? (p.station ? p.station + '／徒歩' + p.walkMin : '徒歩' + p.walkMin) : null, '分');
+  specs += specRow('築年数', p.ageYears != null ? (p.ageYears === 0 ? '新築' : p.ageYears + '年') + (p.builtLabel ? '（' + p.builtLabel + '築）' : '') : null);
+  if (t === 'mansion') {
+    specs += specRow('専有面積', p.ownArea, '㎡');
+    specs += specRow('持分', p.share);
+  } else {
+    specs += specRow('延床面積', p.floorArea, '㎡');
+  }
+  return '<article class="card">' +
+    '<div class="top"><span class="tag ' + t + '">' + TYPE_LABEL[t] + '</span></div>' +
+    '<h3>' + esc(p.name || '物件情報') + '</h3>' +
+    '<div class="price">' + (p.priceMan != null ? esc(priceLabel(p.priceMan)) : '<span class="na">価格はお問い合わせください</span>') + '</div>' +
+    '<ul class="specs">' + specs + '</ul>' +
+    '<p class="note">※ 情報元（会社名・電話番号・担当者名等）は掲載しておりません。</p>' +
+    '<div class="foot"><a class="btn btn-line" href="' + esc(CONFIG.LINE_URL) + '" target="_blank" rel="noopener">' +
+    LINE_SVG + 'この物件をLINEで問い合わせ</a></div></article>';
+}
+function renderPublic() {
+  var type = document.getElementById('fType').value;
+  var sort = document.getElementById('fSort').value;
+  var arr = items.filter(function (p) { return !type || p.type === type; });
+  var by = {
+    priceAsc: function (a, b) { return (a.priceMan == null) - (b.priceMan == null) || a.priceMan - b.priceMan; },
+    priceDesc: function (a, b) { return (a.priceMan == null) - (b.priceMan == null) || b.priceMan - a.priceMan; },
+    walkAsc: function (a, b) { return (a.walkMin == null) - (b.walkMin == null) || a.walkMin - b.walkMin; },
+    ageAsc: function (a, b) { return (a.ageYears == null) - (b.ageYears == null) || a.ageYears - b.ageYears; }
+  }[sort];
+  if (by) arr.sort(by);
+  document.getElementById('pubGrid').innerHTML = arr.map(cardHtml).join('');
+  document.getElementById('pubEmpty').hidden = arr.length > 0;
+  document.getElementById('pubCount').textContent = arr.length ? arr.length + '件を表示中' : '';
+}
+document.getElementById('fType').addEventListener('change', renderPublic);
+document.getElementById('fSort').addEventListener('change', renderPublic);
+
+/* =================================================================
+   7. 管理画面
+   ================================================================= */
+var authToken = null, drafts = [];
+
+function ngWords() {
+  return (document.getElementById('ngWords').value || '')
+    .split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+}
+function logTo(el, msg, cls) {
+  var d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.innerHTML = msg;
+  el.appendChild(d);
+}
+function setModeBadge() {
+  var b = document.getElementById('modeBadge');
+  if (Store.mode === 'wix') { b.textContent = 'Wix CMS 接続中（全訪問者に公開）'; b.className = 'status'; }
+  else { b.textContent = '標準モード：このブラウザにのみ保存（Wix CMS未接続）'; b.className = 'status warnmode'; }
+}
+
+/* --- ログイン --- */
+function doLogin() {
+  var el = document.getElementById('loginLog');
+  el.innerHTML = '';
+  var pw = document.getElementById('pw').value;
+  if (!pw) { logTo(el, 'パスワードを入力してください。', 'err'); return; }
+  document.getElementById('btnLogin').disabled = true;
+  Store.login(pw).then(function (r) {
+    document.getElementById('btnLogin').disabled = false;
+    if (!r.ok) { logTo(el, esc(r.error), 'err'); return; }
+    authToken = r.token;
+    document.getElementById('adminLogin').hidden = true;
+    document.getElementById('adminBody').hidden = false;
+    document.getElementById('btnLogout').hidden = false;
+    setModeBadge();
+    refresh();
+  });
+}
+document.getElementById('btnLogin').addEventListener('click', doLogin);
+document.getElementById('pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+document.getElementById('btnLogout').addEventListener('click', function () {
+  authToken = null; drafts = [];
+  document.getElementById('adminBody').hidden = true;
+  document.getElementById('btnLogout').hidden = true;
+  document.getElementById('adminLogin').hidden = false;
+  document.getElementById('pw').value = '';
+  document.getElementById('reviewArea').innerHTML = '';
+});
+
+/* --- ② ドラッグ＆ドロップ --- */
+var dz = document.getElementById('dz'), fi = document.getElementById('fileInput');
+['dragenter', 'dragover'].forEach(function (t) {
+  dz.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); dz.classList.add('over'); });
+});
+['dragleave', 'drop'].forEach(function (t) {
+  dz.addEventListener(t, function (e) { e.preventDefault(); e.stopPropagation(); dz.classList.remove('over'); });
+});
+dz.addEventListener('drop', function (e) {
+  var f = e.dataTransfer && e.dataTransfer.files;
+  if (f && f.length) handleFiles(f);
+});
+dz.addEventListener('click', function () { fi.click(); });
+dz.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); } });
+fi.addEventListener('change', function () { if (fi.files.length) handleFiles(fi.files); fi.value = ''; });
+/* ページ外へのドロップでブラウザが遷移するのを防ぐ */
+window.addEventListener('dragover', function (e) { e.preventDefault(); });
+window.addEventListener('drop', function (e) { e.preventDefault(); });
+
+function handleFiles(fileList) {
+  var log = document.getElementById('dropLog');
+  Array.prototype.slice.call(fileList).forEach(function (file) {
+    var line = document.createElement('div');
+    line.innerHTML = '<span class="spin"></span> ' + esc(file.name) + ' を読み取り中…';
+    log.appendChild(line);
+    readAny(file).then(function (text) {
+      if (!text || text.replace(/\s/g, '').length < 20) {
+        throw new Error('テキストを抽出できませんでした（画像のみのPDF／スキャン資料の可能性があります）');
+      }
+      var res = extract(text, ngWords());
+      res.record.sourceFile = file.name;
+      var id = 'd' + Date.now() + Math.random().toString(36).slice(2, 6);
+      drafts.unshift({ id: id, res: res });
+      line.className = 'ok';
+      line.innerHTML = '✔ ' + esc(file.name) + ' を読み取りました（情報元 ' + res.redaction.total + ' 件を削除）';
+      renderReview();
+    }).catch(function (err) {
+      line.className = 'err';
+      line.innerHTML = '✖ ' + esc(file.name) + '：' + esc(err.message || String(err));
+    });
+  });
+}
+
+/* --- ③ 抽出結果のレビュー --- */
+function renderReview() {
+  var area = document.getElementById('reviewArea');
+  area.innerHTML = drafts.map(function (d) {
+    var r = d.res.record, req = requiredKeys(r.type);
+    var rows = '';
+    rows += '<div class="row"><label>種別</label><select data-f="type" data-id="' + d.id + '">' +
+      ['house', 'mansion'].map(function (t) {
+        return '<option value="' + t + '"' + (r.type === t ? ' selected' : '') + '>' + TYPE_LABEL[t] + '</option>';
+      }).join('') + '</select></div>';
+    rows += '<div class="row"><label>物件名</label><input data-f="name" data-id="' + d.id + '" value="' + esc(r.name || '') + '" placeholder="例）〇〇3丁目の戸建"></div>';
+    req.forEach(function (k) {
+      var v = r[k];
+      var miss = (v === null || v === undefined || v === '');
+      rows += '<div class="row"><label>' + FIELD_LABEL[k] + '</label>' +
+        '<input class="' + (miss ? 'miss' : '') + '" data-f="' + k + '" data-id="' + d.id + '" value="' + esc(v == null ? '' : v) + '" placeholder="' + (miss ? '資料から読み取れませんでした（手入力）' : '') + '"></div>';
+    });
+    if (r.walkMin != null || r.station) {
+      rows += '<div class="row"><label>最寄駅（任意）</label><input data-f="station" data-id="' + d.id + '" value="' + esc(r.station || '') + '"></div>';
+    }
+
+    var hits = d.res.redaction.hits;
+    var hitList = Object.keys(hits).map(function (k) { return '<li>' + esc(k) + '：' + hits[k] + '件</li>'; }).join('');
+
+    return '<div class="panel" style="padding:0;overflow:hidden">' +
+      '<div class="review" style="border:0;border-radius:0">' +
+        '<div class="hd">③ 読み取り結果の確認：' + esc(r.sourceFile || '') +
+          '<span class="spacer" style="flex:1"></span>' +
+          '<button class="btn primary sm" data-act="publish" data-id="' + d.id + '">ユーザー画面に掲載</button>' +
+          '<button class="btn sm danger" data-act="discard" data-id="' + d.id + '">破棄</button>' +
+        '</div>' +
+        '<div class="fields">' + rows + '</div>' +
+        '<div class="redact">④ 情報元を <b>' + d.res.redaction.total + '件</b> 削除しました。' +
+          (hitList ? '<ul>' + hitList + '</ul>' : '<br>削除対象は検出されませんでした。') + '</div>' +
+        '<details class="raw"><summary>削除後のテキストを確認する</summary><pre>' + esc(d.res.cleanText) + '</pre></details>' +
+      '</div></div>';
+  }).join('');
+}
+
+document.getElementById('reviewArea').addEventListener('input', function (e) {
+  var f = e.target.getAttribute('data-f'), id = e.target.getAttribute('data-id');
+  if (!f || !id) return;
+  var d = drafts.filter(function (x) { return x.id === id; })[0];
+  if (!d) return;
+  var v = e.target.value;
+  if (['priceMan', 'walkMin', 'ageYears', 'floorArea', 'ownArea'].indexOf(f) !== -1) {
+    d.res.record[f] = v === '' ? null : num(v);
+  } else {
+    d.res.record[f] = v === '' ? null : v;
+  }
+});
+document.getElementById('reviewArea').addEventListener('change', function (e) {
+  if (e.target.getAttribute('data-f') !== 'type') return;
+  var id = e.target.getAttribute('data-id');
+  var d = drafts.filter(function (x) { return x.id === id; })[0];
+  if (!d) return;
+  d.res.record.type = e.target.value;
+  /* 種別変更時は、その種別の項目を読み直す（※1） */
+  var t = d.res.cleanText;
+  if (e.target.value === 'mansion') {
+    if (d.res.record.ownArea == null) d.res.record.ownArea = pickArea(t, 'own');
+    if (d.res.record.share == null) d.res.record.share = pickShare(t);
+  } else if (d.res.record.floorArea == null) {
+    d.res.record.floorArea = pickArea(t, 'floor');
+  }
+  renderReview();
+});
+document.getElementById('reviewArea').addEventListener('click', function (e) {
+  var act = e.target.getAttribute('data-act'), id = e.target.getAttribute('data-id');
+  if (!act || !id) return;
+  var i = drafts.map(function (x) { return x.id; }).indexOf(id);
+  if (i < 0) return;
+  if (act === 'discard') { drafts.splice(i, 1); renderReview(); return; }
+  if (act === 'publish') {
+    var rec = drafts[i].res.record;
+    e.target.disabled = true;
+    Store.save(rec, authToken).then(function () {
+      drafts.splice(i, 1);
+      renderReview();
+      setModeBadge();
+      return refresh();
+    }).catch(function (err) {
+      e.target.disabled = false;
+      alert('掲載に失敗しました：' + (err.message || err));
+    });
+  }
+});
+
+/* --- 掲載中一覧 --- */
+function renderAdminList() {
+  var tb = document.getElementById('admRows');
+  tb.innerHTML = items.map(function (p) {
+    var area = p.type === 'mansion'
+      ? (p.ownArea != null ? p.ownArea + '㎡（専有）' : '—')
+      : (p.floorArea != null ? p.floorArea + '㎡（延床）' : '—');
+    return '<tr>' +
+      '<td>' + TYPE_LABEL[p.type === 'mansion' ? 'mansion' : p.type === 'house' ? 'house' : 'unknown'] + '</td>' +
+      '<td>' + esc(p.name || '（未設定）') + '</td>' +
+      '<td class="num">' + (p.priceMan != null ? esc(priceLabel(p.priceMan)) : '—') + '</td>' +
+      '<td class="num">' + (p.walkMin != null ? '徒歩' + p.walkMin + '分' : '—') + '</td>' +
+      '<td class="num">' + (p.ageYears != null ? (p.ageYears === 0 ? '新築' : p.ageYears + '年') : '—') + '</td>' +
+      '<td class="num">' + esc(area) + '</td>' +
+      '<td class="num">' + esc(p.share || '—') + '</td>' +
+      '<td><button class="btn sm danger" data-del="' + esc(p._id) + '">削除</button></td>' +
+      '</tr>';
+  }).join('');
+  document.getElementById('admEmpty').hidden = items.length > 0;
+}
+document.getElementById('admRows').addEventListener('click', function (e) {
+  var id = e.target.getAttribute('data-del');
+  if (!id) return;
+  if (!confirm('この物件をユーザー画面から削除しますか？')) return;
+  e.target.disabled = true;
+  Store.remove(id, authToken).then(refresh).catch(function (err) {
+    e.target.disabled = false; alert('削除に失敗しました：' + (err.message || err));
+  });
+});
+
+/* --- 削除ワード --- */
+try { document.getElementById('ngWords').value = localStorage.getItem(LS_NG) || ''; } catch (e) {}
+document.getElementById('btnSaveNg').addEventListener('click', function () {
+  try { localStorage.setItem(LS_NG, document.getElementById('ngWords').value); } catch (e) {}
+  document.getElementById('ngSaved').textContent = '保存しました（' + ngWords().length + '語）';
+});
+
+/* =================================================================
+   8. 起動
+   ================================================================= */
+function refresh() {
+  return Store.list().then(function (a) {
+    items = (a || []).slice();
+    renderPublic();
+    if (!document.getElementById('view-admin').hidden) { renderAdminList(); setModeBadge(); }
+  });
+}
+
+function currentMode() {
+  var q = new URLSearchParams(location.search);
+  var m = (q.get('mode') || q.get('view') || '').toLowerCase();
+  if (m === 'admin') return 'admin';
+  if (m === 'public' || m === 'user') return 'public';
+  return /admin/.test(location.pathname) ? 'admin' : 'public';
+}
+function applyMode(mode) {
+  document.getElementById('view-public').hidden = (mode === 'admin');
+  document.getElementById('view-admin').hidden = (mode !== 'admin');
+  document.documentElement.setAttribute('data-mode', mode);
+}
+applyMode(currentMode());
+
+/* Velo 側から mode を指定された場合にも対応 */
+window.addEventListener('message', function (ev) {
+  var d = ev.data;
+  if (d && typeof d === 'object' && d.channel === 'reLp' && d.action === 'setMode') {
+    applyMode(d.payload === 'admin' ? 'admin' : 'public');
+    refresh();
+  }
+});
+
+refresh();
+
+/* テスト用に内部関数を公開 */
+window.__RE = {
+  extract: extract, redact: redact, pickPrice: pickPrice, pickWalk: pickWalk,
+  pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
+  priceLabel: priceLabel, applyMode: applyMode, CONFIG: CONFIG
+};
+</script>
+</body>
+</html>
