@@ -42,12 +42,12 @@
       "action": "choose",
       "value": "売マンション",
       "targets": [
+        { "by": "css", "value": "select:has(option:text-is('売マンション'))" },
         { "by": "label", "value": "物件種別1" },
         { "by": "name", "value": "bukkenShubetsu1" },
         { "by": "css", "value": "select[name*='shubetsu']" }
       ],
-      "note": "choose=プルダウンでもクリック式（チェック/ボタン）でも選べる。",
-      "verify": { "contains": "売マンション" }
+      "note": "『売マンション』という選択肢を持つ<select>を直接狙う。上部の保存済み検索(ワンタッチ検索)の隠れた同名項目を避けるため text-is で厳密一致。物件種別1・2は同じ選択肢を持つが .first で先頭(=種別1)を選ぶ。"
     },
 
     { "id": "scroll_to_ensen1", "description": "「沿線1」まで下方向にスクロール", "action": "scroll", "value": 700 },
