@@ -194,22 +194,29 @@ def _click_download(page, targets, timeout_ms) -> None:
         except Exception:
             pass
 
-    # 診断: ダウンロード関連のリクエストが何本飛んでいるかを記録
-    #（2本飛んで検出1なら Chrome の複数DLブロック、1本なら REINS 側の問題）
-    def _on_req(r):
+    # REINSは createZmnPdfFile で「2分割のPDF(複数)」をサーバー生成し、その応答に
+    # 各ファイルの downloadId / etag が入る。応答を捕まえて全ファイルのURLを組み立てる。
+    create_texts: list[str] = []
+
+    def _on_resp(resp):
         try:
-            u = r.url or ""
-            low = u.lower()
-            if "reins" in low and ("datalizer" in low or "download" in low or "zmn" in low or ".pdf" in low):
-                get_logger().info("  ・DL関連リクエスト: %s", u[:140])
+            u = (resp.url or "").lower()
+            if "createzmnpdffile" in u:
+                try:
+                    txt = resp.text()
+                except Exception:
+                    txt = ""
+                if txt:
+                    create_texts.append(txt)
+                    get_logger().info("  ・createZmnPdfFile応答: %s", txt[:400])
         except Exception:
             pass
 
-    ctx.on("page", lambda p: (p.on("download", _grab), p.on("request", _on_req)))
+    ctx.on("page", lambda p: (p.on("download", _grab), p.on("response", _on_resp)))
     for p in list(ctx.pages):
         try:
             p.on("download", _grab)
-            p.on("request", _on_req)
+            p.on("response", _on_resp)
         except Exception:
             pass
 
@@ -262,20 +269,63 @@ def _click_download(page, targets, timeout_ms) -> None:
             break
 
     log.info("検出したダウンロード件数: %d", len(found))
-    if not found:
+
+    # ダウンロードURL一覧を組み立てる（downloadIdで重複排除）。
+    import re as _re
+    import urllib.parse as _up
+
+    # ダウンロードURLの基底。捕捉済みURLから採るか、REINSの既定パスを使う。
+    base = "https://system.reins.jp/main/api/BK/GBK002100/downloadZmnIkktPdfFile"
+    for u, _fn in found:
+        if "downloadZmnIkktPdfFile" in u:
+            base = u.split("?", 1)[0]
+            break
+
+    targets_dl: list[str] = []            # 保存対象のURL
+    seen_ids: set[str] = set()
+
+    def _add_url(u: str):
+        try:
+            q = _up.parse_qs(_up.urlparse(u).query)
+            did = (q.get("downloadId") or [""])[0]
+        except Exception:
+            did = ""
+        key = did or u
+        if key in seen_ids:
+            return
+        seen_ids.add(key)
+        targets_dl.append(u)
+
+    # 1) 実際に発火したダウンロードURL
+    for u, _fn in found:
+        _add_url(u)
+
+    # 2) createZmnPdfFile 応答から全ファイル分の downloadId/etag を取り出して組み立て
+    for txt in create_texts:
+        ids = _re.findall(r'"downloadId"\s*:\s*"([^"]+)"', txt)
+        etags = _re.findall(r'"etag"\s*:\s*"([^"]+)"', txt)
+        if ids and len(ids) == len(etags):
+            for did, et in zip(ids, etags):
+                _add_url(f"{base}?downloadId={_up.quote(did)}&etag={_up.quote(et)}")
+        else:
+            # etagが別構造でも、downloadIdだけでも試す（etagは無くても通る場合がある）
+            for did in ids:
+                _add_url(f"{base}?downloadId={_up.quote(did)}")
+
+    if not targets_dl:
         raise StepError(
-            "図面のダウンロードを検出できませんでした。"
-            "『一括取得』の押下対象や前段の手順を確認してください。"
+            "図面のダウンロードURLを取得できませんでした。"
+            "createZmnPdfFileの応答またはダウンロード検出を確認してください。"
         )
+
+    log.info("保存対象の図面ファイル数: %d", len(targets_dl))
 
     # ブラウザから独立して、Cookie付きでURLから直接ダウンロードして保存する
     saved = 0
-    for i, (url, fn) in enumerate(found, start=1):
+    for i, url in enumerate(targets_dl, start=1):
         try:
-            name = fn or f"zumen_{int(_t.time())}_{i}.pdf"
-            dest = DOWNLOAD_DIR / name
-            if dest.exists():
-                dest = DOWNLOAD_DIR / f"{dest.stem}_{int(_t.time())}_{i}{dest.suffix}"
+            stamp = _t.strftime("%Y%m%d%H%M%S")
+            dest = DOWNLOAD_DIR / f"zmn_list_{stamp}_{i}.pdf"
             req = urllib.request.Request(
                 url,
                 headers={
@@ -286,6 +336,9 @@ def _click_download(page, targets, timeout_ms) -> None:
             )
             with urllib.request.urlopen(req, timeout=180) as r:
                 data = r.read()
+            if not data or len(data) < 500:
+                log.warning("応答が小さすぎます（%dバイト）: %s", len(data) if data else 0, url)
+                continue
             with open(dest, "wb") as f:
                 f.write(data)
             log.info("図面を保存しました（%dバイト）: %s", len(data), dest)
