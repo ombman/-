@@ -281,10 +281,10 @@ def _click_download(page, targets, timeout_ms) -> None:
             base = u.split("?", 1)[0]
             break
 
-    targets_dl: list[str] = []            # 保存対象のURL
+    targets_dl: list[tuple[str, str]] = []   # (URL, 保存ファイル名)
     seen_ids: set[str] = set()
 
-    def _add_url(u: str):
+    def _add_url(u: str, fname: str = ""):
         try:
             q = _up.parse_qs(_up.urlparse(u).query)
             did = (q.get("downloadId") or [""])[0]
@@ -294,23 +294,25 @@ def _click_download(page, targets, timeout_ms) -> None:
         if key in seen_ids:
             return
         seen_ids.add(key)
-        targets_dl.append(u)
+        targets_dl.append((u, fname))
 
     # 1) 実際に発火したダウンロードURL
-    for u, _fn in found:
-        _add_url(u)
+    for u, fn in found:
+        _add_url(u, fn)
 
-    # 2) createZmnPdfFile 応答から全ファイル分の downloadId/etag を取り出して組み立て
+    # 2) createZmnPdfFile 応答から全ファイル分の downloadId/etag を取り出して組み立て。
+    #    キーは downloadId / downloadId2 / downloadId3 ... と番号付き（etag, downloadFileNameも同様）。
     for txt in create_texts:
-        ids = _re.findall(r'"downloadId"\s*:\s*"([^"]+)"', txt)
-        etags = _re.findall(r'"etag"\s*:\s*"([^"]+)"', txt)
-        if ids and len(ids) == len(etags):
-            for did, et in zip(ids, etags):
-                _add_url(f"{base}?downloadId={_up.quote(did)}&etag={_up.quote(et)}")
-        else:
-            # etagが別構造でも、downloadIdだけでも試す（etagは無くても通る場合がある）
-            for did in ids:
-                _add_url(f"{base}?downloadId={_up.quote(did)}")
+        id_map = dict(_re.findall(r'"downloadId(\d*)"\s*:\s*"([^"]+)"', txt))
+        etag_map = dict(_re.findall(r'"etag(\d*)"\s*:\s*"([^"]+)"', txt))
+        name_map = dict(_re.findall(r'"downloadFileName(\d*)"\s*:\s*"([^"]+)"', txt))
+        for suffix, did in id_map.items():
+            et = etag_map.get(suffix, "")
+            fname = name_map.get(suffix, "")
+            if et:
+                _add_url(f"{base}?downloadId={_up.quote(did)}&etag={_up.quote(et)}", fname)
+            else:
+                _add_url(f"{base}?downloadId={_up.quote(did)}", fname)
 
     if not targets_dl:
         raise StepError(
@@ -322,10 +324,15 @@ def _click_download(page, targets, timeout_ms) -> None:
 
     # ブラウザから独立して、Cookie付きでURLから直接ダウンロードして保存する
     saved = 0
-    for i, url in enumerate(targets_dl, start=1):
+    for i, (url, fname) in enumerate(targets_dl, start=1):
         try:
             stamp = _t.strftime("%Y%m%d%H%M%S")
-            dest = DOWNLOAD_DIR / f"zmn_list_{stamp}_{i}.pdf"
+            name = fname or f"zmn_list_{stamp}_{i}.pdf"
+            if not name.lower().endswith(".pdf"):
+                name += ".pdf"
+            dest = DOWNLOAD_DIR / name
+            if dest.exists():
+                dest = DOWNLOAD_DIR / f"{dest.stem}_{stamp}_{i}{dest.suffix}"
             req = urllib.request.Request(
                 url,
                 headers={
