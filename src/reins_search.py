@@ -102,6 +102,8 @@ def _run_step(page, step: dict[str, Any], default_timeout: int) -> None:
     # 2)〜3) アクション実行
     if action == "click":
         click_target(page, targets, timeout_ms, coordinate_fallback=coord)
+    elif action == "click_download":
+        _click_download(page, targets, timeout_ms)
     elif action == "fill":
         fill_target(page, targets, value, timeout_ms)
     elif action == "select":
@@ -154,6 +156,70 @@ def _choose(page, targets, value, timeout_ms) -> None:
     click_targets = [{"by": "text", "value": str(value), "options": {"exact": True}},
                      {"by": "text", "value": str(value)}]
     click_target(page, click_targets, timeout_ms)
+
+
+def _click_download(page, targets, timeout_ms) -> None:
+    """
+    「クリックして図面をダウンロード保存」する専用処理。
+
+    REINSは『一括取得』クリック直後にウィンドウを閉じてしまうため、通常のクリック→
+    非同期ハンドラでは保存前に接続が切れる。そこで expect_download で「クリックする前に
+    ダウンロードを予約」して権利を確保し、閉じられる前に保存する。
+    ポップアップ(別タブ)経由のダウンロードにも備え、コンテキストのdownloadも拾う。
+    """
+    import time as _t
+
+    from browser import DOWNLOAD_DIR
+
+    log = get_logger()
+    ctx = page.context
+    box: dict[str, Any] = {"d": None}
+
+    def _grab(d):
+        if box["d"] is None:
+            box["d"] = d
+
+    # 別タブ（ポップアップ）で発生するダウンロードにも備える
+    ctx.on("page", lambda p: p.on("download", _grab))
+    for p in list(ctx.pages):
+        try:
+            p.on("download", _grab)
+        except Exception:
+            pass
+
+    # メインページで「予約」しつつクリック（閉じられる前に権利を確保）
+    try:
+        with page.expect_download(timeout=timeout_ms) as di:
+            try:
+                click_target(page, targets, timeout_ms)
+            except Exception as exc:
+                log.debug("  ・クリック時の例外（ダウンロード遷移の可能性、継続）: %s", exc)
+        box["d"] = di.value
+    except Exception as exc:
+        log.debug("  ・expect_downloadで未捕捉（%s）。ハンドラ捕捉を待ちます。", type(exc).__name__)
+        deadline = _t.time() + 15
+        while box["d"] is None and _t.time() < deadline:
+            live = next((p for p in ctx.pages if not p.is_closed()), None)
+            if live is None:
+                break
+            try:
+                live.wait_for_timeout(300)
+            except Exception:
+                break
+
+    download = box["d"]
+    if download is None:
+        raise StepError(
+            "図面のダウンロードを検出できませんでした。"
+            "『一括取得』の押下対象、または取得手順（前段の全選択・図面一括取得）を確認してください。"
+        )
+
+    name = download.suggested_filename or f"zumen_{int(_t.time())}.zip"
+    dest = DOWNLOAD_DIR / name
+    if dest.exists():
+        dest = DOWNLOAD_DIR / f"{dest.stem}_{int(_t.time())}{dest.suffix}"
+    download.save_as(str(dest))
+    log.info("図面をダウンロード保存しました: %s", dest)
 
 
 def _scroll_into_view(page, targets, timeout_ms) -> None:

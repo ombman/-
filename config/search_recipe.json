@@ -165,14 +165,14 @@
     { "id": "click_zumen_ikkatsu", "description": "「図面の一括取得」をクリック", "action": "click",
       "targets": [ { "by": "role", "value": "図面一括取得", "options": { "role": "button" } }, { "by": "text", "value": "図面の一括取得" }, { "by": "text", "value": "図面一括取得" } ] },
     { "id": "wait_dialog", "description": "確認ポップアップの表示を待つ", "action": "wait_ms", "value": 1500 },
-    { "id": "dialog_ikkatsu", "description": "出てきたポップアップ内の「一括取得」をクリック", "action": "click",
+    { "id": "dialog_ikkatsu", "description": "ポップアップ内の「一括取得」を押して図面をダウンロード保存", "action": "click_download",
       "targets": [
         { "by": "css", "value": ".modal.show button:text-is('一括取得')" },
         { "by": "css", "value": ".modal.show >> text=一括取得" },
         { "by": "role", "value": "一括取得", "options": { "role": "button", "exact": true } },
         { "by": "text", "value": "一括取得", "options": { "exact": true } }
       ],
-      "note": "背後の『図面一括取得』ではなく、ポップアップ(.modal.show)内の『一括取得』を厳密一致(text-is)で狙う。ダウンロードはトップの downloads フォルダに保存されます。" },
-    { "id": "wait_download", "description": "図面ダウンロードの完了を待つ（時間は必要に応じて調整）", "action": "wait_ms", "value": 30000 }
+      "note": "click_download=クリック前にダウンロードを予約(expect_download)して確保し、REINSがウィンドウを閉じる前に downloads フォルダへ保存する。" },
+    { "id": "wait_download", "description": "図面ダウンロードの後処理を待つ", "action": "wait_ms", "value": 3000 }
   ]
 }

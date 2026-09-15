@@ -86,21 +86,16 @@ class BrowserSession:
         except Exception as exc:
             log.debug("window.close 無効化スクリプトの登録に失敗（続行）: %s", exc)
 
-        # ダウンロード（図面など）を downloads フォルダへ確実に保存する。
-        # ※Playwrightは download イベントを受けて save_as しないとファイルが残らない。
-        self._context.on("page", lambda p: p.on("download", self._save_download))
-
         # 既に開いているタブがあれば使い、無ければ新規に開く
+        # ※図面のダウンロード保存は reins_search の click_download が
+        #   expect_download で確実に行う（ここでの自動ハンドラは二重保存になるため付けない）。
         self.page = self._context.pages[0] if self._context.pages else self._context.new_page()
-        # 現在のページにもダウンロード保存を登録
-        self.page.on("download", self._save_download)
 
         # 保存用の常駐タブ（keep-alive）を1枚開く。
         # 図面の一括取得後にREINSが操作ウィンドウを閉じても、この空タブが残るため
-        # コンテキスト（ブラウザ接続）が生き続け、ダウンロードを保存しきれる。
+        # コンテキスト（ブラウザ接続）が生き続けやすくなる。
         try:
             self._keepalive = self._context.new_page()
-            self._keepalive.on("download", self._save_download)
             self.page.bring_to_front()
         except Exception as exc:
             log.debug("keep-aliveタブの作成に失敗（続行）: %s", exc)
