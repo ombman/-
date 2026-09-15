@@ -310,10 +310,13 @@ def _click_download(page, targets, timeout_ms) -> None:
         for suffix, did in id_map.items():
             et = etag_map.get(suffix, "")
             fname = name_map.get(suffix, "")
+            # サーバー要件: downloadId / etag / fileName の3つが必須。
+            params = {"downloadId": did}
             if et:
-                _add_url(f"{base}?downloadId={_up.quote(did)}&etag={_up.quote(et)}", fname)
-            else:
-                _add_url(f"{base}?downloadId={_up.quote(did)}", fname)
+                params["etag"] = et
+            if fname:
+                params["fileName"] = fname
+            _add_url(f"{base}?{_up.urlencode(params)}", fname)
 
     if not targets_dl:
         raise StepError(
