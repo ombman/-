@@ -23,6 +23,7 @@
 - [x] Wix エディタ（クラシック）サイトの新規作成
 - [x] **Velo（サイトコード）の有効化** — `PROVISIONED`
 - [x] Wix CMS アプリのインストール
+- [x] シークレット `adminPassword` / `adminTokenSalt` の登録
 - [x] CMS コレクション **`Properties`** の作成
       （`title` / `propertyType` / `priceMan` / `walkMin` / `station` / `ageYears` /
       `builtLabel` / `floorArea` / `ownArea` / `ownShare` / `sourceFile`）
@@ -35,11 +36,13 @@
 
 | キー | 値 |
 |---|---|
-| `adminPassword` | 管理画面のログインパスワード（ご自身で決める） |
-| `adminTokenSalt` | `e17df47da13f4fefa6b4c9f50f5503494e8700d55ca5e6aa0e9257c80d1d4190` |
+| `adminPassword` | 管理画面のログインパスワード |
+| `adminTokenSalt` | トークン署名用のランダム文字列（`openssl rand -hex 32`） |
 
-※ `adminTokenSalt` は本リポジトリ用に生成したランダム値です。気になる場合は
-`openssl rand -hex 32` で作り直した値に差し替えてください。
+**この2つは登録済みです。値はチャットでお伝えしています。**
+
+> ⚠ 秘密情報はこのリポジトリに書かないでください。本リポジトリは公開設定のため、
+> 記載した時点で第三者が閲覧できます。値の確認・変更は Wix のシークレットマネージャーで行ってください。
 
 ### 2. バックエンドコードを追加
 エディタ → 開発者モード → バックエンド → 新規ファイル `properties.web.js`
