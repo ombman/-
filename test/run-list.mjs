@@ -67,5 +67,22 @@ det.forEach(d => {
 ok('少なくとも1物件で概要項目が取れている', det.some(d => d.details.length > 0),
    det.map(d => d.details.length).join(','), '>0');
 
+
+/* 取りこぼし防止：項目が少ないページも一覧に出すこと */
+console.log('\n-- ページの取りこぼしが無いこと');
+const mixed = await p.evaluate(() => {
+  const full = ['物件種目 中古マンション', '総額 3,780 万円',
+                '阪急神戸線 西宮北口 駅 徒歩 9 分', '㎡73.32'].join('\n');
+  const thin = ['建物名称 サンプルハイツ', '所在地 西宮市深津町6-32',
+                '間取り 3LDK', '物件種目 中古マンション', '管理費 11,000円'].join('\n');
+  const cover = ['目次', '1', '2', '3'].join('\n');
+  const empty = '   ';
+  const res = window.__RE.extractAll([full, thin, cover, empty], []);
+  return res.map(r => ({ page: r.pageNo, filled: r.filled }));
+});
+ok('項目がそろうページは出る', mixed.some(m => m.page === 1 && m.filled >= 2), mixed, 'page1');
+ok('項目が少ない資料ページも出る（手入力用）', mixed.some(m => m.page === 2), mixed, 'page2');
+ok('目次・空ページは出さない', !mixed.some(m => m.page === 3 || m.page === 4), mixed, 'no 3,4');
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();

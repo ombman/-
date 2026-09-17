@@ -777,12 +777,20 @@ function extract(rawText, extraWords) {
   return { record: rec, redaction: r, cleanText: t };
 }
 
-/* 物件として扱うだけの中身があるか（表紙・目次・空ページを弾く） */
-function looksLikeProperty(res) {
-  var r = res.record;
-  var filled = [r.priceMan, r.walkMin, r.ageYears, r.floorArea, r.ownArea, r.share]
+/* 物件が載っているページかどうか。
+   取りこぼしを防ぐため判定はゆるくし、迷ったら一覧に出す。
+   不要なものは確認画面の「破棄」で外してもらう。 */
+var PROPERTY_WORDS = /物件|価格|万円|専有面積|延床面積|間取り|駅|徒歩|マンション|戸建|持分|敷地権|築年|管理費|所在地/g;
+function filledCount(r) {
+  return [r.priceMan, r.walkMin, r.ageYears, r.floorArea, r.ownArea, r.share]
     .filter(function (v) { return v !== null && v !== undefined && v !== ''; }).length;
-  return filled >= 2;
+}
+function looksLikeProperty(res) {
+  if (filledCount(res.record) >= 1) return true;
+  /* 項目が1つも取れなくても、物件資料らしい語が並ぶページは一覧に出して手入力してもらう */
+  var body = res.cleanText || '';
+  var hits = (body.match(PROPERTY_WORDS) || []).length;
+  return hits >= 4 && body.replace(/\s/g, '').length >= 40;
 }
 
 /* 3-9. 1つの資料から複数物件を取り出す。
@@ -794,6 +802,7 @@ function extractAll(sections, extraWords) {
     if (!text || text.replace(/\s/g, '').length < 40) return;
     var res = extract(text, extraWords);
     res.pageNo = i + 1;
+    res.filled = filledCount(res.record);
     if (looksLikeProperty(res)) out.push(res);
   });
   return out;
@@ -1085,7 +1094,10 @@ function handleFiles(fileList) {
         drafts.unshift({ id: 'd' + Date.now() + Math.random().toString(36).slice(2, 6), res: res });
       });
       line.className = 'ok';
-      line.innerHTML = '✔ ' + esc(file.name) + ' から <b>' + results.length + '件の物件</b>を読み取りました' +
+      var need = results.filter(function (r) { return r.filled <= 2; }).length;
+      line.innerHTML = '✔ ' + esc(file.name) + '（' + (sections.length) + 'ページ）から <b>' +
+        results.length + '件</b>を読み取りました' +
+        (need ? '　<b>うち ' + need + '件は項目が不足しています（確認画面で手入力してください）</b>' : '') +
         '（電話番号・会社名など ' + masked + ' か所を伏せました）';
       renderReview();
     }).catch(function (err) {
@@ -1127,6 +1139,11 @@ function renderReview() {
       '<div class="review" style="border:0;border-radius:0">' +
         '<div class="hd">③ 読み取り結果の確認：' + esc(r.sourceFile || '') +
           (d.res.pageNo ? '（' + d.res.pageNo + 'ページ目）' : '') +
+          (d.res.filled === 0
+            ? '<span class="tag unknown" style="margin-left:8px">未取得：手入力が必要</span>'
+            : d.res.filled <= 2
+              ? '<span class="tag unknown" style="margin-left:8px">' + d.res.filled + '項目のみ取得</span>'
+              : '') +
           '<span class="spacer" style="flex:1"></span>' +
           '<button class="btn primary sm" data-act="publish" data-id="' + d.id + '">ユーザー画面に掲載</button>' +
           '<button class="btn sm danger" data-act="discard" data-id="' + d.id + '">破棄</button>' +
