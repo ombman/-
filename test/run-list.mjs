@@ -51,5 +51,21 @@ const bad = await p.evaluate(() => {
 ok('価格が無い資料では価格を空にする（月額費用を拾わない）', bad.price === null, bad.price, null);
 ok('その資料でも持分は取れる', bad.share === '3788/967999', bad.share, '3788/967999');
 
+
+/* ④ 公開される内容に会社情報が一切含まれないこと（ホワイトリスト方式の検証） */
+console.log('\n-- 公開される物件概要に会社情報が含まれないこと');
+const det = await p.evaluate(secs => window.__RE.extractAll(secs, []).map(r => ({
+  page: r.pageNo, details: r.record.details })), pages);
+const BAD = new RegExp(['株式会社','有限会社','㈱','㈲','帝人殖産','和田興産','今津建設','野村不動産','日本ハウズイング','伊藤忠','全日空','兵庫県住宅供給公社','味間','栗田','瀬戸根','永柳','国里','TEL','FAX','免許','協会','担当','取引士','営業所','支店','本社','@','https?://','［削除済み］'].join('|'));
+det.forEach(d => {
+  const joined = d.details.map(x => x.label + '=' + x.value).join(' / ');
+  const hit = d.details.filter(x => BAD.test(x.label) || BAD.test(x.value));
+  ok(`${d.page}ページ目：公開項目に会社情報なし（${d.details.length}項目）`, hit.length === 0,
+     hit.map(x => x.label + '=' + x.value).join(', '), 'なし');
+  console.log('     ' + (joined || '（項目なし）'));
+});
+ok('少なくとも1物件で概要項目が取れている', det.some(d => d.details.length > 0),
+   det.map(d => d.details.length).join(','), '>0');
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();

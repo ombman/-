@@ -100,6 +100,21 @@ function safeDocument(v) {
     .slice(0, 20000);
 }
 
+/* 掲載してよい項目だけを通す。サーバ側でも同じ基準で再確認する。 */
+const UNSAFE_VALUE = /［削除済み］|株式会社|有限会社|㈱|㈲|合同会社|[0-9]{2,4}-[0-9]{2,4}-[0-9]{3,4}|@|https?:\/\/|TEL|FAX|電話|免許|協会|担当|取引士|営業所|支店|本社/i;
+function safeDetails(v) {
+  let list;
+  try { list = typeof v === 'string' ? JSON.parse(v) : v; } catch (e) { return null; }
+  if (!Array.isArray(list)) return null;
+  const clean = list
+    .filter((d) => d && typeof d.label === 'string' && typeof d.value === 'string')
+    .filter((d) => d.label.length <= 20 && d.value.length <= 40)
+    .filter((d) => !UNSAFE_VALUE.test(d.label) && !UNSAFE_VALUE.test(d.value))
+    .slice(0, 20)
+    .map((d) => ({ label: d.label, value: d.value }));
+  return clean.length ? JSON.stringify(clean) : null;
+}
+
 function sanitize(r) {
   const type = r && r.type === 'mansion' ? 'mansion' : 'house';
   return {
@@ -115,7 +130,8 @@ function sanitize(r) {
     ownArea: type === 'mansion' ? numOrNull(r.ownArea) : null,
     ownShare: type === 'mansion' ? safeText(r.share) : null,
     sourceFile: safeText(r.sourceFile),
-    sourceText: safeDocument(r.sourceText)
+    sourceText: safeDocument(r.sourceText),
+    detailsJson: safeDetails(r.details)
   };
 }
 
@@ -134,6 +150,7 @@ function toClient(item) {
     share: item.ownShare ?? null,
     sourceFile: item.sourceFile ?? null,
     sourceText: item.sourceText ?? null,
+    detailsJson: item.detailsJson ?? null,
     createdAt: item._createdDate
   };
 }

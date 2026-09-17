@@ -140,6 +140,10 @@ footer.site a{color:#cfe0ef}
 
 table.list{width:100%;border-collapse:collapse;font-size:13.5px}
 table.list th,table.list td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left}
+table.detail{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+table.detail th{text-align:left;color:var(--sub);font-weight:400;white-space:nowrap;
+  padding:6px 10px 6px 0;vertical-align:top;border-bottom:1px dotted #eceff3;width:8.5em}
+table.detail td{padding:6px 0;border-bottom:1px dotted #eceff3}
 table.list th{background:#f3f6f9;color:var(--sub);font-size:12.5px;white-space:nowrap}
 table.list td.num{text-align:right;white-space:nowrap}
 .tblwrap{overflow-x:auto}
@@ -672,6 +676,65 @@ function pickName(t, type) {
   return null;
 }
 
+/* 3-7b. 掲載してよい項目だけを取り出す（ホワイトリスト方式）
+
+   ④の要件に対する方針：
+   資料を「伏せて載せる」のではなく、載せてよいと確認できた項目だけを組み立てる。
+   会社名・連絡先・担当者名は黒塗りするのではなく、出力に一切含めない。
+   下の DETAIL_FIELDS に無い項目は、安全かどうかに関わらず公開されない。 */
+var DETAIL_FIELDS = [
+  { label: '所在地', re: /(?:所在地|所在)\s*[:：]?\s*([^\n\r]{3,40})/,
+    ok: /(?:都|道|府|県|市|区|郡|町|村)[^\n]{0,24}[0-9０-９一二三四五六七八九十]/ },
+  { label: '交通', re: /(?:交通|最寄り?)\s*[:：]?\s*([^\n\r]{3,40})/,
+    ok: /駅[^\n]{0,10}(?:徒歩|バス)[^\n]{0,6}[0-9]/ },
+  { label: '間取り', re: /間取り?\s*[:：]?\s*([^\n\r]{2,20})/,
+    ok: /^[0-9０-９]{0,2}\s*[SLDKRＳＬＤＫＲ]{1,4}(?:\s*[+＋][^\s]{1,8})?$/ },
+  { label: '建物構造', re: /(?:建物構造|構造)\s*[:：]?\s*([^\n\r]{2,30})/,
+    ok: /造/, ng: /面積|築|間取|価格|持分|[0-9][SLDKRＳＬＤＫＲ]/ },
+  { label: '所在階', re: /(?:所在階|階数)\s*[:：]?\s*([^\n\r]{1,20})/, ok: /[0-9]\s*階/ },
+  { label: 'バルコニー面積', re: /バルコニー面積\s*[:：]?\s*([0-9.,]{2,8}\s*(?:\u33a1|m2|平米))/,
+    ok: /[0-9]/ },
+  { label: '土地面積', re: /(?:土地面積|敷地面積)\s*[:：]?\s*([0-9.,]{2,12}\s*(?:\u33a1|m2|平米))/,
+    ok: /[0-9]/ },
+  { label: '総戸数', re: /(?:総戸数|一棟の総?戸数)\s*[:：]?\s*([0-9,]{1,6}\s*戸)/, ok: /戸$/ },
+  { label: '管理費', re: /管理費\s*[:：]?\s*(?:月額)?\s*([0-9,]{3,9}\s*円(?:\s*[\/／]\s*月)?)/,
+    ok: /円$|月$/ },
+
+  { label: '修繕積立金', re: /修繕積立金\s*[:：]?\s*(?:月額)?\s*([0-9,]{3,9}\s*円(?:\s*[\/／]\s*月)?)/,
+    ok: /円$|月$/ },
+  { label: '用途地域', re: /用途地域\s*[:：]?\s*([^\n\r]{2,24})/, ok: /地域$/ },
+  { label: '土地権利', re: /土地権利\s*[:：]?\s*([^\n\r]{2,20})/,
+    ok: /^(?:所有権|借地権|定期借地権|定期賃借権|旧法借地権)$/ },
+  { label: '現況', re: /現況\s*[:：]?\s*([^\n\r]{1,16})/,
+    ok: /^(?:空家|空室|居住中|賃貸中|入居中|使用中|更地|建築中|未完成)$/ },
+  { label: '引渡時期', re: /引渡し?時期\s*[:：]?\s*([^\n\r]{1,20})/,
+    ok: /^(?:相談|即時?|即入居可|予定|[0-9０-９]{1,4}\s*年[^\n]{0,10})$/, ng: /築/ },
+  { label: '建ぺい率／容積率', re: /(?:建ぺい率|建蔽率)[^\n\r]{0,4}容積率\s*[:：]?\s*([^\n\r]{2,24})/,
+    ok: /[%％]/ }
+];
+
+/* この形が少しでも含まれる値は、項目名に関わらず捨てる */
+var UNSAFE_VALUE = /［削除済み］|株式会社|有限会社|㈱|㈲|合同会社|合資会社|[0-9]{2,4}-[0-9]{2,4}-[0-9]{3,4}|[0-9]{10,}|@|https?:\/\/|www\.|TEL|FAX|ＴＥＬ|ＦＡＸ|電話|免許|協会|担当|取引士|媒介業者|営業所|支店|本社/i;
+
+function pickDetails(t) {
+  var s = tighten(t);
+  var out = [];
+  DETAIL_FIELDS.forEach(function (f) {
+    var m = s.match(f.re);
+    if (!m) return;
+    var v = String(m[1]).replace(/[\s\u3000]+/g, ' ').trim()
+                        .replace(/[、,:：\-–—/／|｜]+$/, '').trim();
+    if (v.length < 1 || v.length > 40) return;
+    if (UNSAFE_VALUE.test(v)) return;              /* 疑わしい値は載せない */
+    if (f.ng && f.ng.test(v)) return;
+    if (f.ok && !f.ok.test(v)) return;             /* 項目ごとの形式に合わなければ載せない */
+    if (!/[0-9０-９\u3040-\u30ff\u4e00-\u9fff]/.test(v)) return;
+    if (out.some(function (o) { return o.label === f.label; })) return;
+    out.push({ label: f.label, value: v });
+  });
+  return out;
+}
+
 /* 3-8. 抽出メイン（④削除後のテキストに対して実行）
    引数は「1物件ぶん」のテキスト（PDFなら1ページ）。 */
 function extract(rawText, extraWords) {
@@ -690,7 +753,8 @@ function extract(rawText, extraWords) {
     station: walk ? walk.station : null,
     ageYears: age ? age.years : null,
     builtLabel: age ? age.built : null,
-    sourceText: t,     /* ④ 情報元を削除した資料そのもの */
+    sourceText: t,     /* 管理者の確認用。ユーザー画面には出さない */
+    details: pickDetails(t),  /* ④ 掲載してよいと確認できた項目のみ */
     floorArea: null,   /* 戸建：延床面積 */
     ownArea: null,     /* 区分：専有（占有）面積 */
     share: null        /* 区分：持分 */
@@ -883,6 +947,9 @@ function specRow(k, v, unit) {
 }
 function cardHtml(p) {
   var t = p.type === 'mansion' ? 'mansion' : p.type === 'house' ? 'house' : 'unknown';
+  var details = [];
+  try { details = JSON.parse(p.detailsJson || '[]') || []; } catch (e) { details = []; }
+  if (!Array.isArray(details)) details = [];
   var specs = '';
   specs += specRow('価格', priceLabel(p.priceMan));
   specs += specRow('駅からの徒歩', p.walkMin != null ? (p.station ? p.station + '／徒歩' + p.walkMin : '徒歩' + p.walkMin) : null, '分');
@@ -899,9 +966,11 @@ function cardHtml(p) {
     '<div class="price">' + (p.priceMan != null ? esc(priceLabel(p.priceMan)) : '<span class="na">価格はお問い合わせください</span>') + '</div>' +
     '<ul class="specs">' + specs + '</ul>' +
     '<p class="note">※ 情報元（会社名・電話番号・担当者名等）は掲載しておりません。</p>' +
-    (p.sourceText ? '<details class="raw" style="margin:0 16px 12px">' +
-      '<summary>掲載資料を見る（情報元は削除済み）</summary>' +
-      '<pre>' + esc(p.sourceText) + '</pre></details>' : '') +
+    (details.length ? '<details class="raw" style="margin:0 16px 12px">' +
+      '<summary>物件概要を見る</summary>' +
+      '<table class="detail"><tbody>' + details.map(function (d) {
+        return '<tr><th>' + esc(d.label) + '</th><td>' + esc(d.value) + '</td></tr>';
+      }).join('') + '</tbody></table></details>' : '') +
     '<div class="foot"><a class="btn btn-line" href="' + esc(CONFIG.LINE_URL) + '" target="_blank" rel="noopener">' +
     LINE_SVG + 'この物件をLINEで問い合わせ</a></div></article>';
 }
@@ -1065,7 +1134,16 @@ function renderReview() {
         '<div class="fields">' + rows + '</div>' +
         '<div class="redact">④ 電話番号・会社名・担当者名などを <b>' + d.res.redaction.total + 'か所</b> 伏せました。' +
           (hitList ? '<ul>' + hitList + '</ul>' : '<br>削除対象は検出されませんでした。') + '</div>' +
-        '<details class="raw"><summary>削除後のテキストを確認する</summary><pre>' + esc(d.res.cleanText) + '</pre></details>' +
+        (r.details && r.details.length
+          ? '<div class="redact" style="background:#eef5f9;border-color:#cfe0ec;color:#25567f">' +
+            'ユーザー画面に載る物件概要（これ以外は公開されません）' +
+            '<table class="detail"><tbody>' + r.details.map(function (x) {
+              return '<tr><th>' + esc(x.label) + '</th><td>' + esc(x.value) + '</td></tr>';
+            }).join('') + '</tbody></table></div>'
+          : '<div class="redact" style="background:#f3f6f9;border-color:#dfe5ec;color:#5d6b7d">' +
+            'この資料からは、確実に判定できる概要項目がありませんでした。' +
+            '上の項目（価格・駅徒歩・築年数・面積・持分）だけが公開されます。</div>') +
+        '<details class="raw"><summary>削除後のテキストを確認する（管理者のみ・公開されません）</summary><pre>' + esc(d.res.cleanText) + '</pre></details>' +
       '</div></div>';
   }).join('');
 }
