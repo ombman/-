@@ -11,3 +11,4 @@ secrets.*
 test/fixtures/list/*.pdf
 test/_*.mjs
 test/_*.py
+test/fixtures/list/_mk_sheet.py

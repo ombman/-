@@ -872,6 +872,175 @@ function readAny(file) {
 }
 
 /* =================================================================
+   4-B. ④ 情報元を消したページ画像をつくる
+
+   方針（黒塗りにしない）：
+     1) 連絡先が固まっている下部の帯は、ページごと切り取る
+     2) 上部の帯（社名ロゴが入りやすい）は、周囲と同じ色で塗りつぶす
+     3) 本文中に散っている社名・電話番号などは、その場所の背景色で塗りつぶす
+   いずれも黒い帯を残さず、元の紙面に見えるように仕上げる。
+   ================================================================= */
+
+/* 伏せる対象かどうかを1つの文字列に対して判定する */
+function isSensitiveText(str, extraWords) {
+  var t = String(str || '');
+  if (t.replace(/\s/g, '').length < 2) return false;
+  for (var i = 0; i < (extraWords || []).length; i++) {
+    var w = String(extraWords[i]).trim();
+    if (w.length >= 2 && t.indexOf(w) !== -1) return true;
+  }
+  for (var j = 0; j < REDACT_RULES.length; j++) {
+    REDACT_RULES[j].re.lastIndex = 0;
+    if (REDACT_RULES[j].re.test(t)) return true;
+  }
+  return false;
+}
+
+/* 矩形の周囲から背景色を推定する（白地なら白、色地ならその色） */
+function sampleBackground(ctx, x, y, w, h) {
+  var pts = [], W = ctx.canvas.width, H = ctx.canvas.height;
+  var ring = 3;
+  for (var i = 0; i <= 8; i++) {
+    var px = Math.round(x + (w * i) / 8);
+    pts.push([px, Math.round(y - ring)], [px, Math.round(y + h + ring)]);
+  }
+  for (var k = 0; k <= 4; k++) {
+    var py = Math.round(y + (h * k) / 4);
+    pts.push([Math.round(x - ring), py], [Math.round(x + w + ring), py]);
+  }
+  var rs = [], gs = [], bs = [];
+  pts.forEach(function (pt) {
+    if (pt[0] < 0 || pt[1] < 0 || pt[0] >= W || pt[1] >= H) return;
+    var d = ctx.getImageData(pt[0], pt[1], 1, 1).data;
+    rs.push(d[0]); gs.push(d[1]); bs.push(d[2]);
+  });
+  if (!rs.length) return 'rgb(255,255,255)';
+  var mid = function (a) { a.sort(function (p, q) { return p - q; }); return a[Math.floor(a.length / 2)]; };
+  return 'rgb(' + mid(rs) + ',' + mid(gs) + ',' + mid(bs) + ')';
+}
+
+/* 1ページ分を描画し、情報元を消した画像を返す */
+function renderRedactedPage(page, extraWords, scale) {
+  var viewport = page.getViewport({ scale: scale || 1.6 });
+  var canvas = document.createElement('canvas');
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  var ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  return page.render({ canvasContext: ctx, viewport: viewport }).promise
+    .then(function () { return page.getTextContent(); })
+    .then(function (content) {
+      var H = canvas.height, W = canvas.width;
+
+      /* PDFは1行が複数の断片に分かれることがあり、「TEL：03-」「1234-5678」のように
+         切れていると断片単位では検出できない。そこで同じ行の断片をまとめ、
+         行全体として判定し、行ごと消す。 */
+      var items = [];
+      content.items.forEach(function (it) {
+        if (!it.str || !it.str.trim()) return;
+        var tr = pdfjsLib.Util.transform(viewport.transform, it.transform);
+        var fh = Math.hypot(tr[2], tr[3]) || (it.height * viewport.scale) || 10;
+        var fw = (it.width || 0) * viewport.scale || it.str.length * fh * 0.6;
+        items.push({ str: it.str, x: tr[4], y: tr[5] - fh, w: fw, h: fh, cy: tr[5] });
+      });
+      items.sort(function (a, b) { return a.cy - b.cy || a.x - b.x; });
+
+      var lines = [];
+      items.forEach(function (it) {
+        var last = lines[lines.length - 1];
+        if (last && Math.abs(last.cy - it.cy) <= Math.max(3, it.h * 0.6)) {
+          last.parts.push(it);
+          last.cy = (last.cy + it.cy) / 2;
+        } else {
+          lines.push({ cy: it.cy, parts: [it] });
+        }
+      });
+
+      var boxes = [];
+      lines.forEach(function (ln) {
+        var text = ln.parts.map(function (q) { return q.str; }).join('');
+        if (!isSensitiveText(text, extraWords)) return;
+        var x0 = Math.min.apply(null, ln.parts.map(function (q) { return q.x; }));
+        var x1 = Math.max.apply(null, ln.parts.map(function (q) { return q.x + q.w; }));
+        var y0 = Math.min.apply(null, ln.parts.map(function (q) { return q.y; }));
+        var y1 = Math.max.apply(null, ln.parts.map(function (q) { return q.y + q.h; }));
+        boxes.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+      });
+
+      var masked = boxes.length, cropped = 0;
+
+      /* 1) 下部に固まっている連絡先は、その位置からページごと切り取る */
+      var lower = boxes.filter(function (b) { return b.y > H * 0.70; });
+      var cutAt = H;
+      if (lower.length >= 2) {
+        var top = Math.min.apply(null, lower.map(function (b) { return b.y; })) - 6;
+        if (top > H * 0.62) { cutAt = Math.floor(top); cropped = H - cutAt; }
+      }
+
+      /* 2) 上部の帯（ロゴが入りやすい）は周囲と同じ色で塗る */
+      var upper = boxes.filter(function (b) { return b.y + b.h < H * 0.16; });
+      if (upper.length >= 1) {
+        var bandBottom = Math.max.apply(null, upper.map(function (b) { return b.y + b.h; })) + 6;
+        var bg = sampleBackground(ctx, 0, bandBottom + 2, W, 8);
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, W, Math.min(bandBottom, H * 0.20));
+      }
+
+      /* 3) 残りは1か所ずつ、その場所の背景色で塗る */
+      boxes.forEach(function (b) {
+        if (b.y >= cutAt) return;                       /* 切り取られる範囲 */
+        if (b.y + b.h < H * 0.16 && upper.length) return; /* 上帯で処理済み */
+        var pad = Math.max(4, b.h * 0.45);   /* 文字の突き出しを残さないよう広めに取る */
+        var x = Math.max(0, b.x - pad), y = Math.max(0, b.y - pad);
+        var w = Math.min(W - x, b.w + pad * 2), h = Math.min(H - y, b.h + pad * 2);
+        if (w <= 0 || h <= 0) return;
+        ctx.fillStyle = sampleBackground(ctx, x, y, w, h);
+        ctx.fillRect(x, y, w, h);
+      });
+
+      /* 切り取り */
+      var out = canvas;
+      if (cutAt < H) {
+        var c2 = document.createElement('canvas');
+        c2.width = W; c2.height = cutAt;
+        c2.getContext('2d').drawImage(canvas, 0, 0, W, cutAt, 0, 0, W, cutAt);
+        out = c2;
+      }
+      return {
+        dataUrl: out.toDataURL('image/jpeg', 0.72),
+        width: out.width, height: out.height,
+        masked: masked, croppedPx: cropped
+      };
+    });
+}
+
+/* PDF全体のページ画像をつくる */
+function renderRedactedPdf(file, extraWords) {
+  if (!window.pdfjsLib) return Promise.resolve([]);
+  return file.arrayBuffer()
+    .then(function (buf) {
+      return pdfjsLib.getDocument({
+        data: buf,
+        cMapUrl: CONFIG.PDFJS_BASE + 'cmaps/',
+        cMapPacked: true,
+        standardFontDataUrl: CONFIG.PDFJS_BASE + 'standard_fonts/'
+      }).promise;
+    })
+    .then(function (pdf) {
+      var out = [], i = 1;
+      function next() {
+        if (i > pdf.numPages) return Promise.resolve(out);
+        var n = i++;
+        return pdf.getPage(n)
+          .then(function (pg) { return renderRedactedPage(pg, extraWords); })
+          .then(function (img) { img.pageNo = n; out.push(img); return next(); })
+          .catch(function () { return next(); });   /* 1ページ失敗しても続ける */
+      }
+      return next();
+    });
+}
+
+/* =================================================================
    5. Wix（Velo）ブリッジ ／ 未接続時は localStorage
    ================================================================= */
 var Bridge = (function () {
@@ -975,6 +1144,9 @@ function cardHtml(p) {
     '<div class="price">' + (p.priceMan != null ? esc(priceLabel(p.priceMan)) : '<span class="na">価格はお問い合わせください</span>') + '</div>' +
     '<ul class="specs">' + specs + '</ul>' +
     '<p class="note">※ 情報元（会社名・電話番号・担当者名等）は掲載しておりません。</p>' +
+    (p.sheetImage ? '<div style="padding:0 16px 12px">' +
+      '<img src="' + esc(p.sheetImage) + '" alt="掲載資料" loading="lazy" ' +
+      'style="width:100%;border:1px solid var(--line);border-radius:9px;display:block"></div>' : '') +
     (details.length ? '<details class="raw" style="margin:0 16px 12px">' +
       '<summary>物件概要を見る</summary>' +
       '<table class="detail"><tbody>' + details.map(function (d) {
@@ -1098,8 +1270,31 @@ function handleFiles(fileList) {
       line.innerHTML = '✔ ' + esc(file.name) + '（' + (sections.length) + 'ページ）から <b>' +
         results.length + '件</b>を読み取りました' +
         (need ? '　<b>うち ' + need + '件は項目が不足しています（確認画面で手入力してください）</b>' : '') +
-        '（電話番号・会社名など ' + masked + ' か所を伏せました）';
+        '（電話番号・会社名など ' + masked + ' か所を伏せました）' +
+        '<br><span class="spin"></span> 掲載用の資料画像を作成中…';
       renderReview();
+
+      /* ④ 情報元を消したページ画像を作り、ページ番号で物件に結びつける */
+      if (/\.pdf$/i.test(file.name)) {
+        return renderRedactedPdf(file, ngWords()).then(function (imgs) {
+          var byPage = {};
+          imgs.forEach(function (im) { byPage[im.pageNo] = im; });
+          var attached = 0, cut = 0, painted = 0;
+          drafts.forEach(function (d) {
+            var im = byPage[d.res.pageNo];
+            if (!im || d.res.record.sourceFile !== file.name) return;
+            d.res.record.sheetImage = im.dataUrl;
+            d.res.sheet = im;
+            attached++; painted += im.masked;
+            if (im.croppedPx > 0) cut++;
+          });
+          line.innerHTML = line.innerHTML.replace(
+            /<br><span class="spin"><\/span> 掲載用の資料画像を作成中…/,
+            '<br>掲載用の資料画像を <b>' + attached + '件</b>作成しました' +
+            '（連絡先 ' + painted + ' 行を消去' + (cut ? '、' + cut + '件は下部の連絡先欄を切り取り' : '') + '）');
+          renderReview();
+        });
+      }
     }).catch(function (err) {
       line.className = 'err';
       line.innerHTML = '✖ ' + esc(file.name) + '：' + esc(err.message || String(err));
@@ -1160,6 +1355,17 @@ function renderReview() {
           : '<div class="redact" style="background:#f3f6f9;border-color:#dfe5ec;color:#5d6b7d">' +
             'この資料からは、確実に判定できる概要項目がありませんでした。' +
             '上の項目（価格・駅徒歩・築年数・面積・持分）だけが公開されます。</div>') +
+        (r.sheetImage
+          ? '<div style="margin:12px 14px 0">' +
+            '<div style="font-size:12.5px;color:var(--sub);margin-bottom:6px">' +
+            '④ ユーザー画面に載る資料画像（情報元は消去済み）' +
+            (d.res.sheet && d.res.sheet.croppedPx ? '　下部の連絡先欄は切り取り済み' : '') + '</div>' +
+            '<img src="' + r.sheetImage + '" alt="掲載用の資料" ' +
+            'style="max-width:100%;border:1px solid var(--line);border-radius:8px;display:block">' +
+            '<label style="display:flex;gap:7px;align-items:center;margin-top:8px;font-size:13px">' +
+            '<input type="checkbox" data-nosheet="' + d.id + '"> この資料画像は掲載しない</label>' +
+            '</div>'
+          : '') +
         '<details class="raw"><summary>削除後のテキストを確認する（管理者のみ・公開されません）</summary><pre>' + esc(d.res.cleanText) + '</pre></details>' +
       '</div></div>';
   }).join('');
@@ -1178,6 +1384,12 @@ document.getElementById('reviewArea').addEventListener('input', function (e) {
   }
 });
 document.getElementById('reviewArea').addEventListener('change', function (e) {
+  var noSheet = e.target.getAttribute('data-nosheet');
+  if (noSheet) {
+    var dd = drafts.filter(function (x) { return x.id === noSheet; })[0];
+    if (dd) dd.res.record.sheetImage = e.target.checked ? null : (dd.res.sheet ? dd.res.sheet.dataUrl : null);
+    return;
+  }
   if (e.target.getAttribute('data-f') !== 'type') return;
   var id = e.target.getAttribute('data-id');
   var d = drafts.filter(function (x) { return x.id === id; })[0];
@@ -1363,7 +1575,8 @@ refresh();
 
 /* テスト用に内部関数を公開 */
 window.__RE = {
-  extract: extract, extractAll: extractAll, redact: redact, pickPrice: pickPrice, pickWalk: pickWalk,
+  extract: extract, extractAll: extractAll, redact: redact,
+  renderRedactedPdf: renderRedactedPdf, isSensitiveText: isSensitiveText, pickPrice: pickPrice, pickWalk: pickWalk,
   tighten: tighten, looksLikeProperty: looksLikeProperty,
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
   priceLabel: priceLabel, applyMode: applyMode, CONFIG: CONFIG

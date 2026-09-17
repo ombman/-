@@ -113,6 +113,14 @@ function safeDetails(v) {
   return clean.length ? JSON.stringify(clean) : null;
 }
 
+/* 掲載用の資料画像。JPEGのデータURLだけを受け付け、それ以外は保存しない。 */
+function safeSheetImage(v) {
+  if (typeof v !== 'string') return null;
+  if (!/^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(v)) return null;
+  if (v.length > 900000) return null;   /* 約660KBを超える画像は受け付けない */
+  return v;
+}
+
 function sanitize(r) {
   const type = r && r.type === 'mansion' ? 'mansion' : 'house';
   return {
@@ -129,7 +137,8 @@ function sanitize(r) {
     ownShare: type === 'mansion' ? safeText(r.share) : null,
     sourceFile: safeText(r.sourceFile),
     sourceText: safeDocument(r.sourceText),
-    detailsJson: safeDetails(r.details)
+    detailsJson: safeDetails(r.details),
+    sheetImage: safeSheetImage(r.sheetImage)
   };
 }
 
@@ -149,6 +158,7 @@ function toClient(item) {
     sourceFile: item.sourceFile ?? null,
     sourceText: item.sourceText ?? null,
     detailsJson: item.detailsJson ?? null,
+    sheetImage: item.sheetImage ?? null,
     createdAt: item._createdDate
   };
 }
