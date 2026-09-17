@@ -5,7 +5,8 @@
   "scripts": {
     "test": "node run.mjs",
     "test:paste": "WIDGET_FILE=paste-into-wix.html node run.mjs",
-    "build:paste": "node build-paste.mjs"
+    "build:paste": "node build-paste.mjs",
+    "test:list": "node run-list.mjs"
   },
   "dependencies": {
     "html-minifier-terser": "^7.2.0",

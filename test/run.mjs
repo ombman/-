@@ -204,7 +204,7 @@ ok('③ PDFから価格を読み取り', /価格（万円）=6480/.test(allVals)
 ok('③ PDFから駅徒歩を読み取り', /徒歩分数（分）=7/.test(allVals) && /徒歩分数（分）=4/.test(allVals));
 ok('③ PDFから延床面積を読み取り（戸建）', /延床面積（㎡）=96.88/.test(allVals));
 ok('③ PDFから専有面積・持分を読み取り（区分）', /専有面積（㎡）=68.42/.test(allVals) && /持分=100000分の1250/.test(allVals));
-ok('④ 削除件数が表示される', drafts.every(d => /削除しました/.test(d.redacted)), drafts[0].redacted);
+ok('④ 削除した箇所数が表示される', drafts.every(d => /か所<\/b> 伏せました/.test(d.redacted) || /か所 伏せました/.test(d.redacted)), drafts[0].redacted);
 const rawShown = await admin.$$eval('#reviewArea .raw pre', e => e.map(x => x.textContent).join('\n'));
 ok('④ 確認用テキストにも情報元が残っていない', !/株式会社|有限会社|03-1234|0120|@/.test(rawShown));
 

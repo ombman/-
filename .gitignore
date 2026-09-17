@@ -8,3 +8,6 @@ test/vendor/
 # 秘密情報はコミットしない（本リポジトリは公開設定）
 *.secret
 secrets.*
+test/fixtures/list/*.pdf
+test/_*.mjs
+test/_*.py

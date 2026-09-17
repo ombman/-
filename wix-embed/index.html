@@ -260,6 +260,9 @@ textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--
     <!-- 抽出結果レビュー -->
     <div id="reviewArea"></div>
 
+    <!-- 掲載済み資料の控え -->
+    <div id="archiveArea"></div>
+
     <!-- ④ 追加の削除ワード -->
     <div class="panel">
       <h2>④ 追加で削除するワード</h2>
@@ -398,19 +401,35 @@ function detectType(t) {
   return m >= h ? { type: 'mansion', score: m } : { type: 'house', score: h };
 }
 
+/* ラベル内の空白を詰める（「専 有 面 積」→「専有面積」）。抽出用の作業コピーにのみ使う */
+function tighten(t) {
+  var s = String(t == null ? '' : t);
+  for (var i = 0; i < 4; i++) {
+    s = s.replace(/([\u3040-\u30ff\u4e00-\u9fff])[ \u3000\t]+(?=[\u3040-\u30ff\u4e00-\u9fff])/g, '$1');
+  }
+  return s;
+}
+
 /* 3-2. 価格（万円単位の数値で保持） */
 function pickPrice(t) {
-  var s = zen2han(t);
-  var labeled = /(?:販売価格|物件価格|売出価格|売価格|価格|価額)\s*[:：]?\s*([0-9,\.]*\s*億)?\s*([0-9,\.]+)?\s*(万円|万|円)/;
-  var m = s.match(labeled) || s.match(/([0-9,\.]+\s*億)?\s*([0-9,\.]+)\s*(万円)/);
-  if (!m) return null;
-  var oku = m[1] ? num(m[1].replace('億', '')) : 0;
-  var man = m[2] != null ? num(m[2]) : 0;
-  var unit = m[3];
-  if (unit === '円' && !m[1]) { return man >= 10000 ? Math.round(man / 10000) : null; }
-  var total = (oku || 0) * 10000 + (man || 0);
-  if (!total || total < 10 || total > 2000000) return null;
-  return Math.round(total * 10) / 10;
+  var s = zen2han(tighten(t));
+
+  var oku = s.match(/([0-9]+)\s*億\s*([0-9,]*)\s*万?円/);
+  if (oku) {
+    var total = num(oku[1]) * 10000 + (oku[2] ? num(oku[2]) : 0);
+    if (total >= 100 && total <= 2000000) return total;
+  }
+  /* 「総額」「価格」ラベルのすぐ後ろを最優先 */
+  var labeled = s.match(/(?:総額|販売価格|物件価格|売出価格|価格)[^0-9]{0,14}([0-9]{1,3}(?:,[0-9]{3})*|[0-9]{3,6})\s*万円/);
+  if (labeled) { var lv = num(labeled[1]); if (lv >= 100 && lv <= 200000) return lv; }
+
+  var re = /([0-9]{1,3}(?:,[0-9]{3})*|[0-9]{3,6})\s*万円/g, m;
+  while ((m = re.exec(s))) { var v = num(m[1]); if (v >= 100 && v <= 200000) return v; }
+
+  /* 万円の表記が離れている図面向け：価格ラベル付近の桁区切り数値 */
+  var near = s.match(/価格[\s\S]{0,140}?([0-9]{1,2},[0-9]{3})(?!\s*円)/);
+  if (near) { var nv = num(near[1]); if (nv >= 100 && nv <= 200000) return nv; }
+  return null;
 }
 function priceLabel(man) {
   if (man == null) return null;
@@ -428,97 +447,213 @@ function cleanStation(raw) {
   var q = nm.match(/[「『\u201c"]([^」』\u201d"]{1,16})[」』\u201d"]?\s*$/);
   if (q) nm = q[1];
   nm = nm.replace(/[「」『』\u201c\u201d"]/g, '');
-  nm = nm.split(/線|[:：]|\s|\/|、|・/).pop();
+  nm = nm.split(/線|[:：]|\s|\/|、|・|\)|）/).pop();
   nm = nm.replace(/^(?:交通|最寄|最寄り|アクセス|駅)+/, '').trim();
   if (!nm || nm.length > 12) return null;
   return nm + '駅';
 }
+
 function pickWalk(t) {
-  var s = zen2han(t);
-  var best = null, station = null;
-  var re = /([^\s、。,\n\(\)\/|]{1,20}?)\s*駅\s*(?:より|から)?\s*(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g, m;
+  var s = zen2han(tighten(t));
+  var best = null, station = null, m;
+
+  /* 「〇〇駅 徒歩n分」を最優先。備考の「〇〇まで徒歩n分」を拾わないため */
+  var re = /([^\s、。,\n()]{1,20}?)\s*駅\s*(?:より|から)?\s*(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g;
   while ((m = re.exec(s))) {
     var v = num(m[2]);
     if (v != null && v > 0 && v <= 120 && (best == null || v < best)) {
-      best = v;
-      station = cleanStation(m[1]);
+      best = v; station = cleanStation(m[1]);
     }
   }
-  if (best == null) {
-    var re2 = /(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g;
-    while ((m = re2.exec(s))) {
-      var v2 = num(m[1]);
-      if (v2 != null && v2 > 0 && v2 <= 120 && (best == null || v2 < best)) best = v2;
-    }
+  if (best != null) return { minutes: best, station: station };
+
+  /* 「〇〇 駅 徒歩 n 分」が崩れている図面向けの予備 */
+  var re2 = /(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分?/g;
+  while ((m = re2.exec(s))) {
+    var v2 = num(m[1]);
+    if (v2 != null && v2 > 0 && v2 <= 120 && (best == null || v2 < best)) best = v2;
   }
   if (best == null) return null;
-  return { minutes: best, station: station };
+  return { minutes: best, station: null };
 }
 
 /* 3-4. 築年数（「築○年」／建築年月からの計算／新築） */
 var ERA = { '令和': 2018, '平成': 1988, '昭和': 1925 };
-function pickAge(t) {
-  var s = zen2han(t);
+function ageFromYM(year, mon) {
   var now = new Date(), thisYear = now.getFullYear();
+  if (!(year > 1900 && year <= thisYear + 1)) return null;
+  var age = thisYear - year - ((mon && now.getMonth() + 1 < mon) ? 1 : 0);
+  if (age < 0) age = 0;
+  return { years: age, built: year + '年' + (mon ? mon + '月' : '') };
+}
+function pickAge(t) {
+  var s = zen2han(tighten(t));
+  var m;
 
-  var m = s.match(/築\s*(?:後)?\s*([0-9]{1,3})\s*年/);
+  m = s.match(/築\s*(?:後)?\s*([0-9]{1,3})\s*年/);
   if (m) { var a = num(m[1]); if (a != null && a <= 150) return { years: a, built: null }; }
 
-  /* 「新築」の語より建築年月の記載を優先する（例：「新築一戸建」＋「建築年月 平成29年6月」） */
-  var re = /(?:築年月|建築年月|建築年|竣工年月|竣工|完成年月|新築年月|建築時期)\s*[:：]?\s*(令和|平成|昭和)?\s*([0-9]{1,4}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?/;
-  m = s.match(re) || s.match(/(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?\s*築?/);
-  if (m) {
-    var era = m[1], y = m[2] === '元' ? 1 : num(m[2]), mon = m[3] ? num(m[3]) : 1;
-    var year = era ? ERA[era] + y : y;
-    if (year > 1900 && year <= thisYear + 1) {
-      var age = thisYear - year - (now.getMonth() + 1 < mon ? 1 : 0);
-      if (age < 0) age = 0;
-      return { years: age, built: year + '年' + (m[3] ? mon + '月' : '') };
+  /* 西暦：「築」または「築年月」ラベルの近くにあるものだけを採用する。
+     備考欄の「平成19年4月24日付けで…」のような無関係な年月を拾わないため。 */
+  var pats = [
+    /((?:19|20)[0-9]{2})[^0-9]{0,10}?(?:([0-9]{1,2})\s*月)?[^0-9]{0,4}築/,
+    /築年月[^0-9]{0,10}((?:19|20)[0-9]{2})[^0-9]{0,6}(?:([0-9]{1,2})\s*月?)?/,
+    /築[^0-9]{0,6}((?:19|20)[0-9]{2})[^0-9]{0,6}(?:([0-9]{1,2})\s*月)?/
+  ];
+  for (var i = 0; i < pats.length; i++) {
+    m = s.match(pats[i]);
+    if (m) {
+      var r = ageFromYM(num(m[1]), m[2] ? num(m[2]) : null);
+      if (r) return r;
     }
+  }
+  /* 「1981（昭和56年）年11月築」のように西暦と月の間に和暦が挟まる書き方 */
+  m = s.match(/((?:19|20)[0-9]{2})[^築]{0,25}?([0-9]{1,2})\s*月\s*築/);
+  if (m) { var r3 = ageFromYM(num(m[1]), num(m[2])); if (r3) return r3; }
+
+  /* 和暦：同じく「築」の近くのみ */
+  m = s.match(/築年月[^0-9]{0,10}(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?/)
+   || s.match(/(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?[^0-9]{0,4}築/);
+  if (m) {
+    var y = m[2] === '元' ? 1 : num(m[2]);
+    var r2 = ageFromYM(ERA[m[1]] + y, m[3] ? num(m[3]) : null);
+    if (r2) return r2;
   }
 
   if (/新築|未入居/.test(s)) return { years: 0, built: null };
+
+  /* 最後の手段：この資料に西暦の年月が1つしか無ければ、それを築年月とみなす。
+     （ラベルと値が離れた表組みの図面向け。複数あるときは誤りやすいので採用しない） */
+  var ys = [], re2 = /((?:19|20)[0-9]{2})\s*年\s*([0-9]{1,2})\s*月/g, y;
+  while ((y = re2.exec(s))) {
+    var yy = num(y[1]);
+    if (yy >= 1950 && yy <= new Date().getFullYear()) ys.push([yy, num(y[2])]);
+  }
+  var uniq = ys.filter(function (v, i, arr) {
+    return arr.findIndex(function (w) { return w[0] === v[0] && w[1] === v[1]; }) === i;
+  });
+  if (uniq.length === 1) {
+    var r4 = ageFromYM(uniq[0][0], uniq[0][1]);
+    if (r4) return r4;
+  }
   return null;
 }
 
-/* 3-5. 面積 */
-var SQM = '(?:\\u33a1|m2|m\\u00b2|M2|平方\\u30e1\\u30fc\\u30c8\\u30eb|\\u5e73\\u7c73)';
+/* 3-5. 面積
+   図面によって「専有面積 73.32㎡」とも「㎡73.32」とも書かれ、
+   PDFからの抽出では順序が崩れることもあるため、㎡の値をすべて集めて選ぶ。 */
+var SQM_RE = /(?:([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?)[ \t]*(?:\u33a1|m2|m\u00b2|平米|平方メートル)|(?:\u33a1|m2|m\u00b2|平米)[ \t]*([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?))/g;
+/* 専有面積として採用しない文脈 */
+var AREA_NG = /敷地|土地|バルコニー|テラス|専用庭|トランク|総面積|坪|delivered/;
+
+function areaCandidates(t) {
+  var s = zen2han(tighten(t));
+  var out = [], m;
+  SQM_RE.lastIndex = 0;
+  while ((m = SQM_RE.exec(s))) {
+    var v = num(m[1] != null ? m[1] : m[2]);
+    if (v == null || v < 10 || v > 400) continue;
+    var ctx = s.slice(Math.max(0, m.index - 14), m.index + m[0].length + 6);
+    out.push({ value: v, ng: AREA_NG.test(ctx), labeled: /(?:専有|占有)面積?/.test(ctx) });
+  }
+  return out;
+}
 function pickArea(t, kind) {
-  var s = zen2han(t);
+  var s = zen2han(tighten(t));
+  /* まずラベル直結の記載を探す */
   var pat = kind === 'floor'
-    ? '(?:\\u5ef6\\s*\\u3079?\\s*\\u5e8a\\s*\\u9762\\u7a4d|\\u5ef6\\u9762\\u7a4d|\\u5efa\\u7269\\u9762\\u7a4d|\\u5e8a\\u9762\\u7a4d)'
-    : '(?:\\u5c02\\u6709\\u9762\\u7a4d|\\u5360\\u6709\\u9762\\u7a4d|\\u5c02\\u6709\\u90e8\\u5206\\u9762\\u7a4d|\\u5c02\\u6709)';
-  var m = s.match(new RegExp(pat + '\\s*[:：]?\\s*(?:\\u7d04)?\\s*([0-9,]+(?:\\.[0-9]+)?)\\s*' + SQM));
-  if (!m) return null;
-  var v = num(m[1]);
-  if (v == null || v <= 0 || v > 100000) return null;
-  return Math.round(v * 100) / 100;
+    ? '(?:延べ?床面積|延面積|建物面積|床面積)'
+    : '(?:専有面積|占有面積|専有部分の?面積|専有部分)';
+  var m = s.match(new RegExp(pat + '[^0-9]{0,10}([0-9,]+(?:\\.[0-9]+)?)\\s*(?:\u33a1|m2|m\u00b2|平米)'));
+  if (m) {
+    var v = num(m[1]);
+    if (v != null && v >= 10 && v <= 400) return Math.round(v * 100) / 100;
+  }
+  /* 単位が省略された「専有部分：37.88」のような書き方。
+     整数だと戸数などを拾いやすいので、小数付きの値に限る。 */
+  var m2 = s.match(new RegExp(pat + '[^0-9]{0,8}([0-9]{2,3}\\.[0-9]+)'));
+  if (m2) {
+    var v2 = num(m2[1]);
+    if (v2 != null && v2 >= 10 && v2 <= 400) return Math.round(v2 * 100) / 100;
+  }
+
+  /* 見つからなければ、㎡の値から用途で除外して最大値を採る */
+  var cands = areaCandidates(t).filter(function (c) { return !c.ng; });
+  var labeled = cands.filter(function (c) { return c.labeled; });
+  var pool = labeled.length ? labeled : cands;
+  if (!pool.length) return null;
+  var best = pool.reduce(function (a, b) { return b.value > a.value ? b : a; });
+  return Math.round(best.value * 100) / 100;
 }
 
-/* 3-6. 持分（区分所有） */
+/* 3-6. 持分（区分所有）
+   「7049 709457」「7131 / 245724」「7,761/838,084」「100000分の1250」等に対応 */
 function pickShare(t) {
-  var s = zen2han(t);
-  var m = s.match(/(?:敷地権(?:の)?割合|敷地権割合|持\s*ち?\s*分(?:割合)?)\s*[:：]?\s*([0-9,]+\s*分の\s*[0-9,]+|[0-9,]+\s*\/\s*[0-9,]+|[0-9]+(?:\.[0-9]+)?\s*%)/);
-  if (!m) return null;
-  return m[1].replace(/\s+/g, '');
+  var s = zen2han(tighten(t));
+  var m;
+
+  /* 「100000分の1250」は分母が先。表記をそのまま残す */
+  m = s.match(/(?:共有持分|敷地権割合|敷地権の割合|持ち?分割合|持ち?分)[^0-9]{0,12}([0-9,]+\s*分の\s*[0-9,]+)/);
+  if (m) return m[1].replace(/\s+/g, '');
+
+  /* 「7049 709457」「7,761/838,084」は分子が先 */
+  m = s.match(/(?:共有持分|敷地権割合|敷地権の割合|持ち?分割合|持ち?分)[^0-9]{0,12}([0-9,]+)\s*(?:\/|\s)\s*([0-9,]+)/);
+  if (m) {
+    var a = m[1].replace(/,/g, ''), b = m[2].replace(/,/g, '');
+    if (Number(a) > 0 && Number(b) > Number(a)) return a + '/' + b;
+  }
+
+  m = s.match(/(?:共有持分|敷地権割合|持ち?分)[^0-9]{0,12}([0-9]+(?:\.[0-9]+)?\s*%)/);
+  if (m) return m[1].replace(/\s+/g, '');
+
+  /* ラベルと値が離れている図面向け：分数の形そのものを探す
+     （分子 < 分母、分母が4桁以上という持分の性質で絞り込む） */
+  var re = /([0-9][0-9,]{1,11})\s*(?:\/|分の)\s*([0-9][0-9,]{3,11})/g, x;
+  while ((x = re.exec(s))) {
+    var na = Number(x[1].replace(/,/g, '')), nb = Number(x[2].replace(/,/g, ''));
+    if (na >= 10 && nb >= 1000 && na < nb && na / nb <= 0.5) {
+      return x[0].indexOf('分の') >= 0 ? x[0].replace(/\s+/g, '')
+                                       : (na + '/' + nb);
+    }
+  }
+  return null;
 }
 
 /* 3-7. 物件名 */
+var NAME_NG = /万円|［削除済み］|[0-9]{3,}/;
+var NAME_HINT = /マンション|ハイツ|テラス|コート|レジデンス|ハウス|ヒルズ|パーク|タワー|ガーデン|プラウド|ワコーレ|グラン|シティ|ヴィラ|メゾン|パレス|ステージ|ビュー/;
+
 function pickName(t, type) {
-  var s = String(t);
-  var m = s.match(/(?:物件名|建物名|マンション名|名称)\s*[:：]?\s*([^\n\r]{1,40})/);
+  var s = tighten(t);
+
+  /* ラベルのある図面（「建物名称 〇〇」） */
+  var m = s.match(/(?:建物名称|建物名|マンション名|物件名称|物件名|名称)\s*[:：]?\s*([^\n\r]{2,40})/);
   if (m) {
-    var v = m[1].trim().replace(/[\s　]{2,}/g, ' ');
-    if (v && v.indexOf(MASK) === -1) return v;
+    var v = m[1].trim().replace(/[\s\u3000]{2,}/g, ' ');
+    if (v && !NAME_NG.test(v) && v !== 'マンション') return v;
   }
-  var loc = s.match(/(?:所在地|所在|住所)\s*[:：]?\s*([^\n\r]{1,40})/);
-  if (loc && loc[1].indexOf(MASK) === -1) {
+
+  /* ラベルが無い図面：建物名らしい行のうち最も長いものを使う */
+  var best = null;
+  s.split(/\r?\n/).forEach(function (line) {
+    var v = line.trim();
+    if (v.length < 4 || v.length > 30) return;
+    if (NAME_NG.test(v) || /[:：]/.test(v)) return;
+    if (!NAME_HINT.test(v)) return;
+    if (best == null || v.length > best.length) best = v;
+  });
+  if (best) return best;
+
+  /* それも無ければ所在地から組み立てる */
+  var loc = s.match(/(?:所在地|所在|住所)\s*[:：]?\s*([^\n\r]{2,40})/);
+  if (loc && !NAME_NG.test(loc[1])) {
     return loc[1].trim() + 'の' + (type === 'mansion' ? 'マンション' : type === 'house' ? '戸建' : '物件');
   }
   return null;
 }
 
-/* 3-8. 抽出メイン（④削除後のテキストに対して実行） */
+/* 3-8. 抽出メイン（④削除後のテキストに対して実行）
+   引数は「1物件ぶん」のテキスト（PDFなら1ページ）。 */
 function extract(rawText, extraWords) {
   var r = redact(rawText, extraWords);
   var t = r.text;
@@ -557,6 +692,28 @@ function extract(rawText, extraWords) {
   return { record: rec, redaction: r, cleanText: t };
 }
 
+/* 物件として扱うだけの中身があるか（表紙・目次・空ページを弾く） */
+function looksLikeProperty(res) {
+  var r = res.record;
+  var filled = [r.priceMan, r.walkMin, r.ageYears, r.floorArea, r.ownArea, r.share]
+    .filter(function (v) { return v !== null && v !== undefined && v !== ''; }).length;
+  return filled >= 2;
+}
+
+/* 3-9. 1つの資料から複数物件を取り出す。
+   物件リスト（複数物件が1つのPDFにまとまった資料）では、
+   1ページ＝1物件として扱う。 */
+function extractAll(sections, extraWords) {
+  var out = [];
+  (sections || []).forEach(function (text, i) {
+    if (!text || text.replace(/\s/g, '').length < 40) return;
+    var res = extract(text, extraWords);
+    res.pageNo = i + 1;
+    if (looksLikeProperty(res)) out.push(res);
+  });
+  return out;
+}
+
 /* 種別ごとの必須項目（※1） */
 function requiredKeys(type) {
   return type === 'mansion'
@@ -574,7 +731,10 @@ var FIELD_LABEL = {
 function readTextFile(file) {
   return new Promise(function (res, rej) {
     var fr = new FileReader();
-    fr.onload = function () { res(String(fr.result || '')); };
+    fr.onload = function () {
+      /* 改ページ（\f）で区切られていれば物件ごとに分割する */
+      res(String(fr.result || '').split('\f'));
+    };
     fr.onerror = function () { rej(new Error('ファイルを読み込めませんでした')); };
     fr.readAsText(file, 'utf-8');
   });
@@ -607,7 +767,7 @@ function readPdfFile(file) {
             return out.join('\n');
           }));
       }
-      return Promise.all(jobs).then(function (pages) { return pages.join('\n'); });
+      return Promise.all(jobs);   /* ページごとの配列として返す */
     });
 }
 function readAny(file) {
@@ -742,7 +902,7 @@ document.getElementById('fSort').addEventListener('change', renderPublic);
 /* =================================================================
    7. 管理画面
    ================================================================= */
-var authToken = null, drafts = [];
+var authToken = null, drafts = [], archive = [];
 
 function ngWords() {
   return (document.getElementById('ngWords').value || '')
@@ -781,12 +941,13 @@ function doLogin() {
 document.getElementById('btnLogin').addEventListener('click', doLogin);
 document.getElementById('pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 document.getElementById('btnLogout').addEventListener('click', function () {
-  authToken = null; drafts = [];
+  authToken = null; drafts = []; archive = [];
   document.getElementById('adminBody').hidden = true;
   document.getElementById('btnLogout').hidden = true;
   document.getElementById('adminLogin').hidden = false;
   document.getElementById('pw').value = '';
   document.getElementById('reviewArea').innerHTML = '';
+  document.getElementById('archiveArea').innerHTML = '';
 });
 
 /* --- ② ドラッグ＆ドロップ --- */
@@ -814,16 +975,25 @@ function handleFiles(fileList) {
     var line = document.createElement('div');
     line.innerHTML = '<span class="spin"></span> ' + esc(file.name) + ' を読み取り中…';
     log.appendChild(line);
-    readAny(file).then(function (text) {
-      if (!text || text.replace(/\s/g, '').length < 20) {
+
+    readAny(file).then(function (sections) {
+      var all = (sections || []).join('\n');
+      if (!all || all.replace(/\s/g, '').length < 20) {
         throw new Error('テキストを抽出できませんでした（画像のみのPDF／スキャン資料の可能性があります）');
       }
-      var res = extract(text, ngWords());
-      res.record.sourceFile = file.name;
-      var id = 'd' + Date.now() + Math.random().toString(36).slice(2, 6);
-      drafts.unshift({ id: id, res: res });
+      var results = extractAll(sections, ngWords());
+      if (!results.length) {
+        throw new Error('物件情報を見つけられませんでした（価格・駅徒歩・面積などが読み取れません）');
+      }
+      var masked = 0;
+      results.forEach(function (res) {
+        masked += res.redaction.total;
+        res.record.sourceFile = file.name;
+        drafts.unshift({ id: 'd' + Date.now() + Math.random().toString(36).slice(2, 6), res: res });
+      });
       line.className = 'ok';
-      line.innerHTML = '✔ ' + esc(file.name) + ' を読み取りました（情報元 ' + res.redaction.total + ' 件を削除）';
+      line.innerHTML = '✔ ' + esc(file.name) + ' から <b>' + results.length + '件の物件</b>を読み取りました' +
+        '（電話番号・会社名など ' + masked + ' か所を伏せました）';
       renderReview();
     }).catch(function (err) {
       line.className = 'err';
@@ -859,12 +1029,13 @@ function renderReview() {
     return '<div class="panel" style="padding:0;overflow:hidden">' +
       '<div class="review" style="border:0;border-radius:0">' +
         '<div class="hd">③ 読み取り結果の確認：' + esc(r.sourceFile || '') +
+          (d.res.pageNo ? '（' + d.res.pageNo + 'ページ目）' : '') +
           '<span class="spacer" style="flex:1"></span>' +
           '<button class="btn primary sm" data-act="publish" data-id="' + d.id + '">ユーザー画面に掲載</button>' +
           '<button class="btn sm danger" data-act="discard" data-id="' + d.id + '">破棄</button>' +
         '</div>' +
         '<div class="fields">' + rows + '</div>' +
-        '<div class="redact">④ 情報元を <b>' + d.res.redaction.total + '件</b> 削除しました。' +
+        '<div class="redact">④ 電話番号・会社名・担当者名などを <b>' + d.res.redaction.total + 'か所</b> 伏せました。' +
           (hitList ? '<ul>' + hitList + '</ul>' : '<br>削除対象は検出されませんでした。') + '</div>' +
         '<details class="raw"><summary>削除後のテキストを確認する</summary><pre>' + esc(d.res.cleanText) + '</pre></details>' +
       '</div></div>';
@@ -907,10 +1078,14 @@ document.getElementById('reviewArea').addEventListener('click', function (e) {
   if (act === 'discard') { drafts.splice(i, 1); renderReview(); return; }
   if (act === 'publish') {
     var rec = drafts[i].res.record;
+    var keep = drafts[i].res;
     e.target.disabled = true;
     Store.save(rec, authToken).then(function () {
+      archive.unshift({ name: rec.name || rec.sourceFile, file: rec.sourceFile,
+                        page: keep.pageNo, text: keep.cleanText, hits: keep.redaction.hits });
       drafts.splice(i, 1);
       renderReview();
+      renderArchive();
       setModeBadge();
       return refresh();
     }).catch(function (err) {
@@ -919,6 +1094,24 @@ document.getElementById('reviewArea').addEventListener('click', function (e) {
     });
   }
 });
+
+/* --- 掲載済み資料の控え（④の削除結果をあとから確認するため） --- */
+function renderArchive() {
+  var box = document.getElementById('archiveArea');
+  if (!archive.length) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="panel"><h2>掲載した資料の控え</h2>' +
+    '<p class="desc">掲載後も、どの情報を伏せたかをここで確認できます（この画面を閉じるまで保持します）。</p>' +
+    archive.map(function (a) {
+      var hits = Object.keys(a.hits || {}).map(function (k) {
+        return esc(k) + '：' + a.hits[k] + 'か所';
+      }).join(' ／ ');
+      return '<details class="raw" style="margin:0 0 10px">' +
+        '<summary>' + esc(a.name || '') + '　' + esc(a.file || '') +
+        (a.page ? '（' + a.page + 'ページ目）' : '') + '</summary>' +
+        (hits ? '<div class="redact" style="margin:8px 0 0">' + hits + '</div>' : '') +
+        '<pre>' + esc(a.text) + '</pre></details>';
+    }).join('') + '</div>';
+}
 
 /* --- 掲載中一覧 --- */
 function renderAdminList() {
@@ -1007,7 +1200,8 @@ refresh();
 
 /* テスト用に内部関数を公開 */
 window.__RE = {
-  extract: extract, redact: redact, pickPrice: pickPrice, pickWalk: pickWalk,
+  extract: extract, extractAll: extractAll, redact: redact, pickPrice: pickPrice, pickWalk: pickWalk,
+  tighten: tighten, looksLikeProperty: looksLikeProperty,
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
   priceLabel: priceLabel, applyMode: applyMode, CONFIG: CONFIG
 };
