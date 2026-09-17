@@ -150,6 +150,22 @@ table.list td.num{text-align:right;white-space:nowrap}
 
 .status{font-size:12px;color:var(--sub);padding:7px 12px;background:#f3f6f9;border-radius:9px;display:inline-block}
 .status.warnmode{background:#fdf6f3;color:#7a4a33}
+/* ③ 資料の全画面表示 */
+.viewer{position:fixed;inset:0;z-index:100;background:rgba(17,26,36,.92);
+  display:flex;align-items:center;justify-content:center;padding:14px;
+  padding-top:calc(14px + env(safe-area-inset-top,0px));
+  padding-bottom:calc(14px + env(safe-area-inset-bottom,0px))}
+.viewer img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;
+  background:#fff;cursor:zoom-in;transition:transform .18s ease}
+.viewer.zoomed{align-items:flex-start;justify-content:flex-start;overflow:auto}
+.viewer.zoomed img{max-width:none;max-height:none;width:180%;cursor:zoom-out}
+.viewer .close{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));right:12px;
+  background:#fff;color:var(--ink);border:0;border-radius:999px;
+  width:42px;height:42px;font-size:20px;line-height:1;cursor:pointer;z-index:101}
+.viewer .cap{position:fixed;left:0;right:0;
+  bottom:calc(8px + env(safe-area-inset-bottom,0px));
+  text-align:center;color:#e7edf3;font-size:12.5px;pointer-events:none}
+.sheet-thumb{cursor:zoom-in}
 textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;resize:vertical}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:var(--accent);
   border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
@@ -222,6 +238,13 @@ textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--
   </a>
 </div>
 
+<!-- ③ 資料の全画面表示 -->
+<div class="viewer" id="viewer" hidden>
+  <button class="close" id="viewerClose" type="button" aria-label="閉じる">×</button>
+  <img id="viewerImg" alt="掲載資料">
+  <div class="cap">画像をクリックで拡大／縮小　　Esc または × で閉じる</div>
+</div>
+
 <!-- ============ ① 管理画面（管理者専用） ============ -->
 <div id="view-admin" hidden>
   <header class="site">
@@ -286,9 +309,20 @@ textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--
     <div class="panel">
       <h2>掲載中の物件</h2>
       <p class="desc">ユーザー画面に表示されている物件の一覧です。</p>
+      <div class="toolbar" id="admTools" hidden>
+        <label style="display:flex;align-items:center;gap:7px;font-size:13.5px">
+          <input type="checkbox" id="chkAll"> すべて選択
+        </label>
+        <span class="count" id="selCount">0件を選択中</span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn sm danger" id="btnDelSel" disabled>選択した物件を削除</button>
+        <button class="btn sm danger" id="btnDelAll">すべての物件を削除</button>
+      </div>
+      <div class="log" id="admLog"></div>
       <div class="tblwrap">
         <table class="list">
           <thead><tr>
+            <th style="width:2.6em"></th>
             <th>種別</th><th>物件名</th><th>価格</th><th>駅徒歩</th><th>築年数</th><th>面積</th><th>持分</th><th></th>
           </tr></thead>
           <tbody id="admRows"></tbody>
@@ -364,9 +398,13 @@ var REDACT_RULES = [
   { label: '電話・FAX番号',  re: /0[0-9０-９]{1,4}[\-－ー\(（\s][0-9０-９]{1,4}[\-－ー\)）\s][0-9０-９]{3,4}/g },
   { label: '電話・FAX番号',  re: /0(?:120|800)[\-－ー\s]?[0-9０-９]{2,3}[\-－ー\s]?[0-9０-９]{3,4}/g },
   { label: '宅建業免許番号',  re: /(?:国土交通大臣|[^\s　]{2,4}(?:都|道|府|県)知事)\s*[\(（]?\s*[0-9０-９]{1,2}\s*[\)）]?\s*第?\s*[0-9０-９]{1,6}\s*号/g },
-  { label: '会社名',        re: /(?:株式会社|㈱|有限会社|㈲|合同会社|合資会社|合名会社)\s*[^\s　、。，,\n\/／|｜]{0,20}/g },
-  { label: '会社名',        re: /[^\s　、。，,\n\/／|｜]{1,20}(?:株式会社|㈱|有限会社|㈲|合同会社)/g },
-  { label: '会社名',        re: /[^\s　、。，,\n\/／|｜:：]{1,14}(?:不動産販売|不動産流通|不動産|住宅販売|ホームズ|ハウジング|リアルエステート|エステート|地所|商事|ホーム)(?=\s|$|[、。，,\n\/／|｜])/g },
+  /* 「〇〇（株）」のように法人格が後ろに付く形を先に処理する。
+     先に法人格だけを消すと社名が残ってしまうため、順序が重要。 */
+  { label: '会社名',        re: /[^\s　、。，,\n\/／|｜]{1,20}(?:株式会社|㈱|有限会社|㈲|合同会社|[（(]\s*株\s*[）)]|[（(]\s*有\s*[）)])/g },
+  { label: '会社名',        re: /(?:株式会社|㈱|有限会社|㈲|合同会社|合資会社|合名会社|[（(]\s*株\s*[）)]|[（(]\s*有\s*[）)]|[（(]\s*同\s*[）)])\s*[^\s　、。，,\n\/／|｜]{0,20}/g },
+  { label: '会社名',        re: /[^\s　、。，,\n\/／|｜:：]{1,14}(?:不動産販売|不動産流通|不動産|住宅販売|住宅|ホームズ|ハウジング|ハウス|リアルエステート|エステート|地所|商事|興産|殖産|建設|工務店|コミュニティ|パートナーズ|ソリューションズ|ビルディング|供給公社)(?=\s|$|[、。，,\n\/／|｜）)])/g },
+  /* 分譲会社・施工会社・管理会社などの欄は、社名が入るため行ごと対象にする */
+  { label: '会社名',        re: /(?:分譲会社|施工会社|設計会社|管理会社|売主|販売提携|販売代理|代理業者|取扱会社|所属協会|保証協会|宅建業免許|宅建免許)\s*[:：]?\s*[^\n\r]{0,40}/g },
   { label: '担当者・窓口',   re: /(?:担当者名|担当者|ご担当|担当|窓口|取扱店|取扱主任者|宅地建物取引士|宅建士|取引士|問合せ先|お問合せ先|お問い合わせ先|お問合わせ先|媒介業者|元付|客付)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{1,12}(?:[ 　][^\s　、。，,\n\/／|｜0-9]{1,12})?/g },
   /* 「担当：山田 太郎」のように姓と名の間に空白がある氏名の取りこぼしを拾う */
   { label: '担当者・窓口',   re: /［削除済み］[ 　]*[^\s　、。，,\n\/／|｜0-9（(]{1,8}(?=[\s　、。，,\n（(]|$)/g },
@@ -798,12 +836,24 @@ function looksLikeProperty(res) {
    1ページ＝1物件として扱う。 */
 function extractAll(sections, extraWords) {
   var out = [];
+  extractAll.lastReport = { total: (sections || []).length, noText: 0, tooLittle: 0, used: 0, skipped: [] };
   (sections || []).forEach(function (text, i) {
-    if (!text || text.replace(/\s/g, '').length < 40) return;
-    var res = extract(text, extraWords);
+    var body = String(text || '');
+    var n = body.replace(/\s/g, '').length;
+    if (n < 40) {
+      /* 文字が取り出せないページ（画像だけのページ・スキャン資料） */
+      extractAll.lastReport.noText++;
+      extractAll.lastReport.skipped.push({ page: i + 1, why: 'テキストなし（画像のみ）', chars: n });
+      return;
+    }
+    var res = extract(body, extraWords);
     res.pageNo = i + 1;
     res.filled = filledCount(res.record);
-    if (looksLikeProperty(res)) out.push(res);
+    if (looksLikeProperty(res)) { extractAll.lastReport.used++; out.push(res); }
+    else {
+      extractAll.lastReport.tooLittle++;
+      extractAll.lastReport.skipped.push({ page: i + 1, why: '物件情報が見当たらない', chars: n });
+    }
   });
   return out;
 }
@@ -1145,8 +1195,9 @@ function cardHtml(p) {
     '<ul class="specs">' + specs + '</ul>' +
     '<p class="note">※ 情報元（会社名・電話番号・担当者名等）は掲載しておりません。</p>' +
     (p.sheetImage ? '<div style="padding:0 16px 12px">' +
-      '<img src="' + esc(p.sheetImage) + '" alt="掲載資料" loading="lazy" ' +
-      'style="width:100%;border:1px solid var(--line);border-radius:9px;display:block"></div>' : '') +
+      '<img class="sheet-thumb" src="' + esc(p.sheetImage) + '" alt="掲載資料をクリックで拡大" loading="lazy" ' +
+      'style="width:100%;border:1px solid var(--line);border-radius:9px;display:block">' +
+      '<p class="note" style="padding:6px 0 0;margin:0">クリックすると画面いっぱいに表示されます</p></div>' : '') +
     (details.length ? '<details class="raw" style="margin:0 16px 12px">' +
       '<summary>物件概要を見る</summary>' +
       '<table class="detail"><tbody>' + details.map(function (d) {
@@ -1172,6 +1223,34 @@ function renderPublic() {
 }
 document.getElementById('fType').addEventListener('change', renderPublic);
 document.getElementById('fSort').addEventListener('change', renderPublic);
+
+/* ③ 資料を画面いっぱいに表示する */
+var viewer = document.getElementById('viewer');
+var viewerImg = document.getElementById('viewerImg');
+function openViewer(src) {
+  viewerImg.src = src;
+  viewer.classList.remove('zoomed');
+  viewer.hidden = false;
+  document.documentElement.style.overflow = 'hidden';
+}
+function closeViewer() {
+  viewer.hidden = true;
+  viewerImg.removeAttribute('src');
+  document.documentElement.style.overflow = '';
+}
+document.getElementById('viewerClose').addEventListener('click', closeViewer);
+viewer.addEventListener('click', function (e) {
+  if (e.target === viewer) closeViewer();
+});
+viewerImg.addEventListener('click', function () { viewer.classList.toggle('zoomed'); });
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && !viewer.hidden) closeViewer();
+});
+/* 資料画像はどこにあってもクリックで全画面になる */
+document.addEventListener('click', function (e) {
+  var img = e.target.closest ? e.target.closest('.sheet-thumb') : null;
+  if (img && img.tagName === 'IMG') { e.preventDefault(); openViewer(img.src); }
+});
 
 /* =================================================================
    7. 管理画面
@@ -1267,9 +1346,14 @@ function handleFiles(fileList) {
       });
       line.className = 'ok';
       var need = results.filter(function (r) { return r.filled <= 2; }).length;
+      var rep = extractAll.lastReport || {};
+      var detail = [];
+      if (rep.noText) detail.push(rep.noText + 'ページは文字を取り出せませんでした（画像のみのページ）');
+      if (rep.tooLittle) detail.push(rep.tooLittle + 'ページに物件情報が見当たりませんでした');
       line.innerHTML = '✔ ' + esc(file.name) + '（' + (sections.length) + 'ページ）から <b>' +
         results.length + '件</b>を読み取りました' +
         (need ? '　<b>うち ' + need + '件は項目が不足しています（確認画面で手入力してください）</b>' : '') +
+        (detail.length ? '<br><span style="color:var(--warn)">内訳：' + detail.join(' ／ ') + '</span>' : '') +
         '（電話番号・会社名など ' + masked + ' か所を伏せました）' +
         '<br><span class="spin"></span> 掲載用の資料画像を作成中…';
       renderReview();
@@ -1360,7 +1444,7 @@ function renderReview() {
             '<div style="font-size:12.5px;color:var(--sub);margin-bottom:6px">' +
             '④ ユーザー画面に載る資料画像（情報元は消去済み）' +
             (d.res.sheet && d.res.sheet.croppedPx ? '　下部の連絡先欄は切り取り済み' : '') + '</div>' +
-            '<img src="' + r.sheetImage + '" alt="掲載用の資料" ' +
+            '<img class="sheet-thumb" src="' + r.sheetImage + '" alt="掲載用の資料（クリックで拡大）" ' +
             'style="max-width:100%;border:1px solid var(--line);border-radius:8px;display:block">' +
             '<label style="display:flex;gap:7px;align-items:center;margin-top:8px;font-size:13px">' +
             '<input type="checkbox" data-nosheet="' + d.id + '"> この資料画像は掲載しない</label>' +
@@ -1493,6 +1577,7 @@ function renderAdminList() {
       ? (p.ownArea != null ? p.ownArea + '㎡（専有）' : '—')
       : (p.floorArea != null ? p.floorArea + '㎡（延床）' : '—');
     return '<tr>' +
+      '<td><input type="checkbox" class="selbox" data-sel="' + esc(p._id) + '"></td>' +
       '<td>' + TYPE_LABEL[p.type === 'mansion' ? 'mansion' : p.type === 'house' ? 'house' : 'unknown'] + '</td>' +
       '<td>' + esc(p.name || '（未設定）') + '</td>' +
       '<td class="num">' + (p.priceMan != null ? esc(priceLabel(p.priceMan)) : '—') + '</td>' +
@@ -1502,12 +1587,68 @@ function renderAdminList() {
       '<td class="num">' + esc(p.share || '—') + '</td>' +
       '<td><button class="btn sm danger" data-del="' + esc(p._id) + '">削除</button></td>' +
       '</tr>' +
-      (p.sourceText ? '<tr><td colspan="8" style="padding-top:0">' +
+      (p.sourceText ? '<tr><td colspan="9" style="padding-top:0">' +
         '<details class="raw" style="margin:0"><summary>情報元を削除した資料を見る</summary>' +
         '<pre>' + esc(p.sourceText) + '</pre></details></td></tr>' : '');
   }).join('');
   document.getElementById('admEmpty').hidden = items.length > 0;
+  document.getElementById('admTools').hidden = items.length === 0;
+  document.getElementById('chkAll').checked = false;
+  updateSelection();
 }
+
+/* --- ①② 選択して一括削除 --- */
+function selectedIds() {
+  return Array.prototype.slice.call(document.querySelectorAll('#admRows .selbox:checked'))
+    .map(function (b) { return b.getAttribute('data-sel'); });
+}
+function updateSelection() {
+  var n = selectedIds().length;
+  document.getElementById('selCount').textContent = n + '件を選択中';
+  document.getElementById('btnDelSel').disabled = n === 0;
+}
+document.getElementById('admRows').addEventListener('change', function (e) {
+  if (e.target.classList.contains('selbox')) updateSelection();
+});
+document.getElementById('chkAll').addEventListener('change', function () {
+  var on = this.checked;
+  Array.prototype.forEach.call(document.querySelectorAll('#admRows .selbox'), function (b) { b.checked = on; });
+  updateSelection();
+});
+
+/* 1件ずつ順に消す（まとめて送るとサーバ側で詰まるため） */
+function removeMany(ids) {
+  var log = document.getElementById('admLog');
+  log.innerHTML = '<div><span class="spin"></span> ' + ids.length + '件を削除中…</div>';
+  var okCount = 0, failed = [];
+  return ids.reduce(function (chain, id) {
+    return chain.then(function () {
+      return Store.remove(id, authToken)
+        .then(function () { okCount++; })
+        .catch(function (err) { failed.push(err.message || String(err)); });
+    });
+  }, Promise.resolve()).then(function () {
+    log.innerHTML = '<div class="ok">✔ ' + okCount + '件を削除しました</div>' +
+      (failed.length ? '<div class="err">✖ ' + failed.length + '件は削除できませんでした：' +
+        esc(failed[0]) + '</div>' : '');
+    return refresh();
+  });
+}
+document.getElementById('btnDelSel').addEventListener('click', function () {
+  var ids = selectedIds();
+  if (!ids.length) return;
+  if (!confirm('選択した ' + ids.length + '件をユーザー画面から削除します。よろしいですか？')) return;
+  this.disabled = true;
+  var btn = this;
+  removeMany(ids).then(function () { btn.disabled = false; });
+});
+document.getElementById('btnDelAll').addEventListener('click', function () {
+  if (!items.length) return;
+  if (!confirm('掲載中の ' + items.length + '件すべてをユーザー画面から削除します。\nこの操作は取り消せません。よろしいですか？')) return;
+  var btn = this;
+  btn.disabled = true;
+  removeMany(items.map(function (p) { return p._id; })).then(function () { btn.disabled = false; });
+});
 document.getElementById('admRows').addEventListener('click', function (e) {
   var id = e.target.getAttribute('data-del');
   if (!id) return;
