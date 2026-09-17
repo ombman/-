@@ -38,5 +38,18 @@ want.forEach(w=>{
   if(w.built) ok('築年', r.builtLabel && r.builtLabel.startsWith(String(w.built)), r.builtLabel, w.built+'年…');
   else ok('築年は未取得（手入力に回る）', r.builtLabel===null, r.builtLabel, null);
 });
+
+/* 実際に起きた誤読の再発防止：
+   価格の記載が無い資料で、修繕積立金などの月額を価格として拾わないこと */
+console.log('\n-- 誤読の再発防止');
+const bad = await p.evaluate(() => {
+  const t = ['物件種目 中古マンション', '専有面積 65.09㎡',
+             '管理費： 月額 11,000', '修繕積立金： 月額 12,500',
+             '駐車場： 月額 16,000', '共有持分：3,788/967,999'].join('\n');
+  return { price: window.__RE.pickPrice(t), share: window.__RE.extract(t, []).record.share };
+});
+ok('価格が無い資料では価格を空にする（月額費用を拾わない）', bad.price === null, bad.price, null);
+ok('その資料でも持分は取れる', bad.share === '3788/967999', bad.share, '3788/967999');
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();

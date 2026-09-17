@@ -108,6 +108,9 @@ for (const [label, res] of [['戸建', h], ['マンション', m], ['ゆれ', m2
   ok(`${label}: 免許番号が残っていない`, !/第\s*\d+\s*号/.test(t));
   ok(`${label}: 物件情報は保持されている`, res.record.priceMan !== null && res.record.walkMin !== null);
 }
+for (const [label, res] of [['戸建', h], ['マンション', m]]) {
+  ok(`${label}: 氏名の一部が残っていない`, !/太郎|一郎|山田|鈴木/.test(res.cleanText), res.cleanText.match(/.{0,12}(太郎|一郎).{0,6}/)?.[0] || 'なし');
+}
 const ng = await page.evaluate(t => window.__RE.redact(t, ['グランドヒルズ中目黒']), manTxt);
 ok('追加削除ワードが効く', !/グランドヒルズ中目黒/.test(ng.text));
 
@@ -218,7 +221,7 @@ for (let i = 0; i < 5; i++) {
 }
 await admin.waitForFunction(() => document.querySelectorAll('#reviewArea .review').length === 0, { timeout: 8000 });
 ok('掲載後、確認欄が空になる', (await admin.$$('#reviewArea .review')).length === 0);
-const rows = await admin.$$eval('#admRows tr', r => r.map(x => x.textContent.replace(/\s+/g, ' ').trim()));
+const rows = await admin.$$eval('#admRows tr:has([data-del])', r => r.map(x => x.textContent.replace(/\s+/g, ' ').trim()));
 ok('管理画面の掲載一覧に2件', rows.length === 2, rows.join(' / '));
 rows.forEach(r => console.log('    ' + r));
 
