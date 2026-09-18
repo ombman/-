@@ -2,7 +2,7 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs'; import http from 'node:http'; import path from 'node:path';
 const ROOT='/home/user/-/wix-embed';
-const srv=http.createServer((q,r)=>{r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});r.end(fs.readFileSync(path.join(ROOT,'index.html')))});
+const srv=http.createServer((q,r)=>{r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});r.end(fs.readFileSync(path.join(ROOT,process.env.WIDGET_FILE||'index.html')))});
 await new Promise(r=>srv.listen(8250,'127.0.0.1',r));
 const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
 const p=await (await b.newContext()).newPage();

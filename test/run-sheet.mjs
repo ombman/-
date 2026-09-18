@@ -2,11 +2,12 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs'; import http from 'node:http'; import path from 'node:path';
 const ROOT='/home/user/-/wix-embed', FIX='/home/user/-/test/fixtures/list';
+const FILE=process.env.WIDGET_FILE||'index.html';
 const PDFJS=path.join('/home/user/-/test','node_modules','pdfjs-dist');
 const srv=http.createServer((q,r)=>{
   const url=q.url.split('?')[0];
   if(url.endsWith('.pdf')){r.writeHead(200,{'Content-Type':'application/pdf'});return r.end(fs.readFileSync(path.join(FIX,path.basename(url))));}
-  const f=path.join(ROOT,url==='/'?'index.html':url);
+  const f=path.join(ROOT,url==='/'?FILE:url);
   if(!fs.existsSync(f)){r.writeHead(404);return r.end()}
   r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});r.end(fs.readFileSync(f));});
 await new Promise(r=>srv.listen(8240,'127.0.0.1',r));
@@ -19,7 +20,7 @@ await ctx.route('https://cdnjs.cloudflare.com/**',rt=>{
   rt.fulfill({status:200,contentType:rel.startsWith('cmaps/')?'application/octet-stream':'text/javascript',body:fs.readFileSync(local)});});
 const p=await ctx.newPage();
 p.on('pageerror',e=>console.log('PAGEERROR',e.message));
-await p.goto('http://127.0.0.1:8240/index.html?mode=admin');
+await p.goto('http://127.0.0.1:8240/'+FILE+'?mode=admin');
 await p.waitForFunction(()=>!!window.__RE);
 
 
@@ -88,7 +89,7 @@ ok('物件情報は残っている', sp.bodyVar >= 8, `ばらつき=${sp.bodyVar
 
 /* 通しの流れ：ドロップ → 画像生成 → 掲載 → ユーザー画面に表示 */
 console.log('\n-- 管理画面からユーザー画面までの通し');
-await p.goto('http://127.0.0.1:8240/index.html?mode=admin');
+await p.goto('http://127.0.0.1:8240/'+FILE+'?mode=admin');
 await p.waitForFunction(() => !!window.__RE);
 await p.fill('#pw', await p.evaluate(() => window.__RE.CONFIG.FALLBACK_PASSWORD));
 await p.click('#btnLogin');

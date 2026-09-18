@@ -391,25 +391,46 @@ function esc(s) {
    ================================================================= */
 var MASK = '［削除済み］';
 
+/* 情報元の判定ルール。
+   strong … 連絡先そのもの。テキストでも画像でも必ず消す。
+   weak   … 社名が入りやすい欄。テキストでは消すが、画像では行ごと消さない
+            （同じ行に物件情報が並ぶ資料があり、巻き添えで消えるため）。 */
 var REDACT_RULES = [
-  { label: 'メールアドレス', re: /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g },
-  { label: 'URL',           re: /(?:https?:\/\/|www\.)[^\s　"'<>））]+/g },
-  { label: '電話・FAX番号',  re: /(?:TEL|Tel|tel|FAX|Fax|fax|ＴＥＬ|ＦＡＸ|電話番号|電話|℡|☎|フリーダイヤル)\s*[:：]?\s*[0-9０-９][0-9０-９\-－ー\(\)（）\s]{6,}/g },
-  { label: '電話・FAX番号',  re: /0[0-9０-９]{1,4}[\-－ー\(（\s][0-9０-９]{1,4}[\-－ー\)）\s][0-9０-９]{3,4}/g },
-  { label: '電話・FAX番号',  re: /0(?:120|800)[\-－ー\s]?[0-9０-９]{2,3}[\-－ー\s]?[0-9０-９]{3,4}/g },
-  { label: '宅建業免許番号',  re: /(?:国土交通大臣|[^\s　]{2,4}(?:都|道|府|県)知事)\s*[\(（]?\s*[0-9０-９]{1,2}\s*[\)）]?\s*第?\s*[0-9０-９]{1,6}\s*号/g },
+  { label: 'メールアドレス', strong: true, re: /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g },
+  { label: 'URL',           strong: true, re: /(?:https?:\/\/|www\.)[^\s　"'<>）)]+/g },
+  { label: '電話・FAX番号',  strong: true, re: /(?:TEL|Tel|tel|FAX|Fax|fax|ＴＥＬ|ＦＡＸ|電話番号|電話|℡|☎|フリーダイヤル|フリーコール)\s*[:：]?\s*[0-9０-９][0-9０-９\-－ー\(\)（）\s]{6,}/g },
+  { label: '電話・FAX番号',  strong: true, re: /0[0-9０-９]{1,4}[\-－ー\(（\s][0-9０-９]{1,4}[\-－ー\)）\s][0-9０-９]{3,4}/g },
+  { label: '電話・FAX番号',  strong: true, re: /0(?:120|800)[\-－ー\s]?[0-9０-９]{2,3}[\-－ー\s]?[0-9０-９]{3,4}/g },
+  { label: '宅建業免許番号',  strong: true, re: /(?:国土交通大臣|[^\s　]{2,4}(?:都|道|府|県)知事)\s*(?:免許)?\s*[\(（]?\s*[0-9０-９]{1,2}\s*[\)）]?\s*第?\s*[0-9０-９]{1,6}\s*号/g },
   /* 「〇〇（株）」のように法人格が後ろに付く形を先に処理する。
      先に法人格だけを消すと社名が残ってしまうため、順序が重要。 */
-  { label: '会社名',        re: /[^\s　、。，,\n\/／|｜]{1,20}(?:株式会社|㈱|有限会社|㈲|合同会社|[（(]\s*株\s*[）)]|[（(]\s*有\s*[）)])/g },
-  { label: '会社名',        re: /(?:株式会社|㈱|有限会社|㈲|合同会社|合資会社|合名会社|[（(]\s*株\s*[）)]|[（(]\s*有\s*[）)]|[（(]\s*同\s*[）)])\s*[^\s　、。，,\n\/／|｜]{0,20}/g },
-  { label: '会社名',        re: /[^\s　、。，,\n\/／|｜:：]{1,14}(?:不動産販売|不動産流通|不動産|住宅販売|住宅|ホームズ|ハウジング|ハウス|リアルエステート|エステート|地所|商事|興産|殖産|建設|工務店|コミュニティ|パートナーズ|ソリューションズ|ビルディング|供給公社)(?=\s|$|[、。，,\n\/／|｜）)])/g },
-  /* 分譲会社・施工会社・管理会社などの欄は、社名が入るため行ごと対象にする */
-  { label: '会社名',        re: /(?:分譲会社|施工会社|設計会社|管理会社|売主|販売提携|販売代理|代理業者|取扱会社|所属協会|保証協会|宅建業免許|宅建免許)\s*[:：]?\s*[^\n\r]{0,40}/g },
-  { label: '担当者・窓口',   re: /(?:担当者名|担当者|ご担当|担当|窓口|取扱店|取扱主任者|宅地建物取引士|宅建士|取引士|問合せ先|お問合せ先|お問い合わせ先|お問合わせ先|媒介業者|元付|客付)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{1,12}(?:[ 　][^\s　、。，,\n\/／|｜0-9]{1,12})?/g },
+  { label: '会社名',        strong: true, re: /[^\s　、。，,\n\/／|｜]{1,20}(?:株式会社|㈱|有限会社|㈲|合同会社|[（(]\s*株\s*[）)]|[（(]\s*有\s*[）)])/g },
+  { label: '会社名',        strong: true, re: /(?:株式会社|㈱|有限会社|㈲|合同会社|合資会社|合名会社|[（(]\s*株\s*[）)]|[（(]\s*有\s*[）)]|[（(]\s*同\s*[）)])\s*[^\s　、。，,\n\/／|｜]{0,20}/g },
+  /* 業種を表す語尾。物件そのものを指す語（中古住宅・一戸建住宅など）は
+     PROTECT_WORDS で除外しているため消えない。 */
+  { label: '会社名',        strong: true, re: /[^\s　、。，,\n\/／|｜:：]{1,14}(?:不動産販売|不動産流通|不動産|住宅販売|ハウジング|リアルエステート|エステート|地所|興産|殖産|工務店|供給公社|コミュニティ|パートナーズ|ソリューションズ|ビルディング|アーバン)(?=\s|$|[、。，,\n\/／|｜）)])/g },
+  { label: '担当者・窓口',   strong: true, re: /(?:担当者名|担当者|ご担当|担当|窓口|取扱店|取扱主任者|宅地建物取引士|宅建士|取引士|問合せ先|お問合せ先|お問い合わせ先|お問合わせ先|媒介業者|元付|客付)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{1,12}(?:[ 　][^\s　、。，,\n\/／|｜0-9]{1,12})?/g },
   /* 「担当：山田 太郎」のように姓と名の間に空白がある氏名の取りこぼしを拾う */
-  { label: '担当者・窓口',   re: /［削除済み］[ 　]*[^\s　、。，,\n\/／|｜0-9（(]{1,8}(?=[\s　、。，,\n（(]|$)/g },
-  { label: '所在地（事業者）', re: /(?:本社|支店|営業所|店舗)\s*[:：]?\s*[^\n]{0,30}/g }
+  { label: '担当者・窓口',   strong: true, re: /［削除済み］[ 　]*[^\s　、。，,\n\/／|｜0-9（(]{1,8}(?=[\s　、。，,\n（(]|$)/g },
+  { label: '協会・団体',     strong: true, re: /[（(](?:公社|一社|公財|一財)[）)]\s*[^\s　、。，,\n\/／|｜]{0,20}/g },
+  /* 以下は weak：社名が入りやすい欄だが、同じ行に物件情報が並ぶことがある */
+  { label: '会社名の欄',     strong: false, re: /(?:分譲会社|施工会社|設計会社|管理会社|売主|販売提携|販売代理|代理業者|取扱会社|所属協会|保証協会|宅建業免許|宅建免許)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{0,24}/g },
+  { label: '所在地（事業者）', strong: false, re: /(?:本社|支店|営業所|店舗)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{0,24}/g }
 ];
+
+/* 物件そのものを指す語。社名らしく見えても絶対に消さない。 */
+var PROTECT_WORDS = [
+  '中古住宅', '新築住宅', '一戸建住宅', '戸建住宅', '住宅ローン', '住宅性能',
+  '中古マンション', '新築マンション', '分譲マンション', 'リゾートマンション',
+  'ハウスクリーニング', 'ホームセキュリティ', 'ホームエレベーター',
+  '建設中', '建設予定', '新築一戸建', '中古一戸建'
+];
+function isProtected(str) {
+  for (var i = 0; i < PROTECT_WORDS.length; i++) {
+    if (String(str).indexOf(PROTECT_WORDS[i]) !== -1) return true;
+  }
+  return false;
+}
 
 function redact(text, extraWords) {
   var hits = {};
@@ -426,6 +447,7 @@ function redact(text, extraWords) {
   REDACT_RULES.forEach(function (rule) {
     out = out.replace(rule.re, function (m) {
       if (m.indexOf(MASK) !== -1) return m;
+      if (isProtected(m)) return m;          /* 物件を指す語は消さない */
       hits[rule.label] = (hits[rule.label] || 0) + 1;
       return MASK;
     });
@@ -834,26 +856,34 @@ function looksLikeProperty(res) {
 /* 3-9. 1つの資料から複数物件を取り出す。
    物件リスト（複数物件が1つのPDFにまとまった資料）では、
    1ページ＝1物件として扱う。 */
-function extractAll(sections, extraWords) {
+function extractAll(sections, extraWords, opts) {
   var out = [];
+  /* keepEmpty: PDFのページは文字が1つも無くても（スキャン画像のページ）一覧に出す */
+  var keepEmpty = !!(opts && opts.keepEmpty);
   extractAll.lastReport = { total: (sections || []).length, noText: 0, tooLittle: 0, used: 0, skipped: [] };
   (sections || []).forEach(function (text, i) {
     var body = String(text || '');
     var n = body.replace(/\s/g, '').length;
-    if (n < 40) {
-      /* 文字が取り出せないページ（画像だけのページ・スキャン資料） */
-      extractAll.lastReport.noText++;
-      extractAll.lastReport.skipped.push({ page: i + 1, why: 'テキストなし（画像のみ）', chars: n });
-      return;
-    }
     var res = extract(body, extraWords);
     res.pageNo = i + 1;
     res.filled = filledCount(res.record);
-    if (looksLikeProperty(res)) { extractAll.lastReport.used++; out.push(res); }
-    else {
-      extractAll.lastReport.tooLittle++;
-      extractAll.lastReport.skipped.push({ page: i + 1, why: '物件情報が見当たらない', chars: n });
+
+    if (n === 0 && !keepEmpty) {
+      /* テキストファイルの空ブロック。掲載する内容が無いので一覧にも出さない。 */
+      extractAll.lastReport.skipped.push(i + 1);
+      return;
     }
+    if (n < 40) {
+      /* 文字が取り出せないページ（スキャンされた図面など）。
+         内容は読めないが、ページの取りこぼしを無くすため一覧には出す。
+         文字が無い＝消すべき箇所も判定できないので、資料画像は既定で掲載しない。 */
+      res.noText = true;
+      extractAll.lastReport.noText++;
+      out.push(res);
+      return;
+    }
+    extractAll.lastReport.used++;
+    out.push(res);
   });
   return out;
 }
@@ -939,9 +969,18 @@ function isSensitiveText(str, extraWords) {
     var w = String(extraWords[i]).trim();
     if (w.length >= 2 && t.indexOf(w) !== -1) return true;
   }
+  /* 画像では strong（連絡先そのもの）だけを対象にする。
+     「管理会社」欄のような weak まで行ごと消すと、
+     同じ行に並ぶ物件情報まで巻き添えで消えるため。 */
   for (var j = 0; j < REDACT_RULES.length; j++) {
+    if (!REDACT_RULES[j].strong) continue;
     REDACT_RULES[j].re.lastIndex = 0;
-    if (REDACT_RULES[j].re.test(t)) return true;
+    if (REDACT_RULES[j].re.test(t)) {
+      REDACT_RULES[j].re.lastIndex = 0;
+      var m = t.match(REDACT_RULES[j].re);
+      if (m && m.every(isProtected)) continue;   /* 物件を指す語だけなら消さない */
+      return true;
+    }
   }
   return false;
 }
@@ -995,15 +1034,25 @@ function renderRedactedPage(page, extraWords, scale) {
       });
       items.sort(function (a, b) { return a.cy - b.cy || a.x - b.x; });
 
+      /* 販売図面は多段組みが多い。y座標だけでまとめると、
+         右列の社名と左列の物件情報が同じ1行と見なされ、
+         ページ幅いっぱいが消えてしまう。
+         そこで横方向に大きく離れた箇所で区切り、列ごとの断片として扱う。 */
       var lines = [];
       items.forEach(function (it) {
         var last = lines[lines.length - 1];
-        if (last && Math.abs(last.cy - it.cy) <= Math.max(3, it.h * 0.6)) {
-          last.parts.push(it);
-          last.cy = (last.cy + it.cy) / 2;
-        } else {
-          lines.push({ cy: it.cy, parts: [it] });
+        if (last) {
+          var prev = last.parts[last.parts.length - 1];
+          var sameRow = Math.abs(last.cy - it.cy) <= Math.max(3, it.h * 0.6);
+          var gap = it.x - (prev.x + prev.w);
+          var nearX = gap <= Math.max(20, it.h * 2.2) && gap >= -it.h * 2;
+          if (sameRow && nearX) {
+            last.parts.push(it);
+            last.cy = (last.cy + it.cy) / 2;
+            return;
+          }
         }
+        lines.push({ cy: it.cy, parts: [it] });
       });
 
       var boxes = [];
@@ -1019,31 +1068,36 @@ function renderRedactedPage(page, extraWords, scale) {
 
       var masked = boxes.length, cropped = 0;
 
-      /* 1) 下部に固まっている連絡先は、その位置からページごと切り取る */
-      var lower = boxes.filter(function (b) { return b.y > H * 0.70; });
+      /* 消す対象でない文字の位置。物件情報を巻き添えにしないための判定に使う */
+      var keepBoxes = [];
+      lines.forEach(function (ln) {
+        var text = ln.parts.map(function (q) { return q.str; }).join('');
+        if (isSensitiveText(text, extraWords)) return;
+        if (!text.replace(/\s/g, '')) return;
+        var y0 = Math.min.apply(null, ln.parts.map(function (q) { return q.y; }));
+        keepBoxes.push({ y: y0 });
+      });
+
+      /* 1) 下部にまとまった連絡先だけを切り取る。
+            切り取る範囲に物件情報が1つでも入るなら切り取らない。 */
       var cutAt = H;
+      var lower = boxes.filter(function (b) { return b.y > H * 0.80; });
       if (lower.length >= 2) {
-        var top = Math.min.apply(null, lower.map(function (b) { return b.y; })) - 6;
-        if (top > H * 0.62) { cutAt = Math.floor(top); cropped = H - cutAt; }
+        var top = Math.floor(Math.min.apply(null, lower.map(function (b) { return b.y; })) - 4);
+        var wouldLose = keepBoxes.filter(function (k) { return k.y >= top; }).length;
+        if (top > H * 0.80 && wouldLose === 0) { cutAt = top; cropped = H - cutAt; }
       }
 
-      /* 2) 上部の帯（ロゴが入りやすい）は周囲と同じ色で塗る */
-      var upper = boxes.filter(function (b) { return b.y + b.h < H * 0.16; });
-      if (upper.length >= 1) {
-        var bandBottom = Math.max.apply(null, upper.map(function (b) { return b.y + b.h; })) + 6;
-        var bg = sampleBackground(ctx, 0, bandBottom + 2, W, 8);
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, W, Math.min(bandBottom, H * 0.20));
-      }
-
-      /* 3) 残りは1か所ずつ、その場所の背景色で塗る */
+      /* 2) 該当箇所だけを、その場所の背景色で塗る。
+            以前はページ上部の帯をまるごと塗っていたが、
+            物件名や価格まで消えるため取りやめた。 */
       boxes.forEach(function (b) {
-        if (b.y >= cutAt) return;                       /* 切り取られる範囲 */
-        if (b.y + b.h < H * 0.16 && upper.length) return; /* 上帯で処理済み */
-        var pad = Math.max(4, b.h * 0.45);   /* 文字の突き出しを残さないよう広めに取る */
+        if (b.y >= cutAt) return;
+        var pad = Math.max(3, b.h * 0.3);
         var x = Math.max(0, b.x - pad), y = Math.max(0, b.y - pad);
         var w = Math.min(W - x, b.w + pad * 2), h = Math.min(H - y, b.h + pad * 2);
         if (w <= 0 || h <= 0) return;
+        if (w > W * 0.94 && h > H * 0.10) return;   /* 広すぎる範囲は安全のため塗らない */
         ctx.fillStyle = sampleBackground(ctx, x, y, w, h);
         ctx.fillRect(x, y, w, h);
       });
@@ -1329,12 +1383,14 @@ function handleFiles(fileList) {
     line.innerHTML = '<span class="spin"></span> ' + esc(file.name) + ' を読み取り中…';
     log.appendChild(line);
 
+    var isPdf = /\.pdf$/i.test(file.name || '') || file.type === 'application/pdf';
     readAny(file).then(function (sections) {
       var all = (sections || []).join('\n');
-      if (!all || all.replace(/\s/g, '').length < 20) {
-        throw new Error('テキストを抽出できませんでした（画像のみのPDF／スキャン資料の可能性があります）');
+      if (!isPdf && (!all || all.replace(/\s/g, '').length < 20)) {
+        throw new Error('テキストを抽出できませんでした（このファイルには文字が入っていません）');
       }
-      var results = extractAll(sections, ngWords());
+      /* PDFはページ数＝資料の枚数。文字が無いページも手入力用に必ず一覧へ出す */
+      var results = extractAll(sections, ngWords(), { keepEmpty: isPdf });
       if (!results.length) {
         throw new Error('物件情報を見つけられませんでした（価格・駅徒歩・面積などが読み取れません）');
       }
@@ -1348,8 +1404,10 @@ function handleFiles(fileList) {
       var need = results.filter(function (r) { return r.filled <= 2; }).length;
       var rep = extractAll.lastReport || {};
       var detail = [];
-      if (rep.noText) detail.push(rep.noText + 'ページは文字を取り出せませんでした（画像のみのページ）');
-      if (rep.tooLittle) detail.push(rep.tooLittle + 'ページに物件情報が見当たりませんでした');
+      if (rep.noText) {
+        detail.push('うち <b>' + rep.noText + 'ページ</b>はスキャンされた画像で文字を取り出せません' +
+          '（項目は手入力、資料画像は目視確認のうえ掲載してください）');
+      }
       line.innerHTML = '✔ ' + esc(file.name) + '（' + (sections.length) + 'ページ）から <b>' +
         results.length + '件</b>を読み取りました' +
         (need ? '　<b>うち ' + need + '件は項目が不足しています（確認画面で手入力してください）</b>' : '') +
@@ -1367,10 +1425,15 @@ function handleFiles(fileList) {
           drafts.forEach(function (d) {
             var im = byPage[d.res.pageNo];
             if (!im || d.res.record.sourceFile !== file.name) return;
-            d.res.record.sheetImage = im.dataUrl;
             d.res.sheet = im;
-            attached++; painted += im.masked;
-            if (im.croppedPx > 0) cut++;
+            if (d.res.noText) {
+              /* 文字が無いページは自動で消せないため、既定では掲載しない */
+              d.res.record.sheetImage = null;
+            } else {
+              d.res.record.sheetImage = im.dataUrl;
+              attached++; painted += im.masked;
+              if (im.croppedPx > 0) cut++;
+            }
           });
           line.innerHTML = line.innerHTML.replace(
             /<br><span class="spin"><\/span> 掲載用の資料画像を作成中…/,
@@ -1418,7 +1481,9 @@ function renderReview() {
       '<div class="review" style="border:0;border-radius:0">' +
         '<div class="hd">③ 読み取り結果の確認：' + esc(r.sourceFile || '') +
           (d.res.pageNo ? '（' + d.res.pageNo + 'ページ目）' : '') +
-          (d.res.filled === 0
+          (d.res.noText
+            ? '<span class="tag unknown" style="margin-left:8px;background:#fbeee8;color:#a84a24">スキャン画像：手入力が必要</span>'
+            : d.res.filled === 0
             ? '<span class="tag unknown" style="margin-left:8px">未取得：手入力が必要</span>'
             : d.res.filled <= 2
               ? '<span class="tag unknown" style="margin-left:8px">' + d.res.filled + '項目のみ取得</span>'
@@ -1449,7 +1514,17 @@ function renderReview() {
             '<label style="display:flex;gap:7px;align-items:center;margin-top:8px;font-size:13px">' +
             '<input type="checkbox" data-nosheet="' + d.id + '"> この資料画像は掲載しない</label>' +
             '</div>'
-          : '') +
+          : (d.res.sheet
+            ? '<div style="margin:12px 14px 0">' +
+              '<div class="redact">このページはスキャンされた画像で、文字の位置が分からないため' +
+              '<b>自動では消去できません</b>。下の画像に会社名・連絡先が写っていないか確認し、' +
+              '問題なければ掲載を選んでください。</div>' +
+              '<img class="sheet-thumb" src="' + d.res.sheet.dataUrl + '" alt="資料（未消去・クリックで拡大）" ' +
+              'style="max-width:100%;border:2px solid var(--warn);border-radius:8px;display:block;margin-top:8px">' +
+              '<label style="display:flex;gap:7px;align-items:center;margin-top:8px;font-size:13px">' +
+              '<input type="checkbox" data-usesheet="' + d.id + '"> 目視で確認した。この資料画像を掲載する</label>' +
+              '</div>'
+            : '')) +
         '<details class="raw"><summary>削除後のテキストを確認する（管理者のみ・公開されません）</summary><pre>' + esc(d.res.cleanText) + '</pre></details>' +
       '</div></div>';
   }).join('');
@@ -1468,6 +1543,12 @@ document.getElementById('reviewArea').addEventListener('input', function (e) {
   }
 });
 document.getElementById('reviewArea').addEventListener('change', function (e) {
+  var useSheet = e.target.getAttribute('data-usesheet');
+  if (useSheet) {
+    var du = drafts.filter(function (x) { return x.id === useSheet; })[0];
+    if (du) du.res.record.sheetImage = e.target.checked && du.res.sheet ? du.res.sheet.dataUrl : null;
+    return;
+  }
   var noSheet = e.target.getAttribute('data-nosheet');
   if (noSheet) {
     var dd = drafts.filter(function (x) { return x.id === noSheet; })[0];
@@ -1716,7 +1797,7 @@ refresh();
 
 /* テスト用に内部関数を公開 */
 window.__RE = {
-  extract: extract, extractAll: extractAll, redact: redact,
+  extract: extract, readPdfFile: readPdfFile, extractAll: extractAll, redact: redact,
   renderRedactedPdf: renderRedactedPdf, isSensitiveText: isSensitiveText, pickPrice: pickPrice, pickWalk: pickWalk,
   tighten: tighten, looksLikeProperty: looksLikeProperty,
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,

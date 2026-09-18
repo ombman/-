@@ -1,13 +1,14 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs'; import http from 'node:http'; import path from 'node:path';
 const ROOT='/home/user/-/wix-embed', FIX='/home/user/-/test/fixtures/list';
-const srv=http.createServer((q,r)=>{const f=path.join(ROOT,q.url.split('?')[0]==='/'?'index.html':q.url.split('?')[0]);
+const FILE=process.env.WIDGET_FILE||'index.html';
+const srv=http.createServer((q,r)=>{const f=path.join(ROOT,q.url.split('?')[0]==='/'?FILE:q.url.split('?')[0]);
  if(!fs.existsSync(f)){r.writeHead(404);return r.end()} r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});r.end(fs.readFileSync(f));});
 await new Promise(r=>srv.listen(8210,'127.0.0.1',r));
 const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
 const p=await (await b.newContext()).newPage();
 p.on('pageerror',e=>console.log('PAGEERROR',e.message));
-await p.goto('http://127.0.0.1:8210/index.html');
+await p.goto('http://127.0.0.1:8210/'+FILE);
 await p.waitForFunction(()=>!!window.__RE);
 
 const pages=['p1','p2','p3','p4','p5'].map(n=>fs.readFileSync(path.join(FIX,n+'.txt'),'utf8'));
@@ -82,7 +83,8 @@ const mixed = await p.evaluate(() => {
 });
 ok('項目がそろうページは出る', mixed.some(m => m.page === 1 && m.filled >= 2), mixed, 'page1');
 ok('項目が少ない資料ページも出る（手入力用）', mixed.some(m => m.page === 2), mixed, 'page2');
-ok('目次・空ページは出さない', !mixed.some(m => m.page === 3 || m.page === 4), mixed, 'no 3,4');
+ok('文字が少ないページも取りこぼさない（スキャン資料対策）', mixed.some(m => m.page === 3), mixed, 'page3');
+ok('白紙ページは出さない', !mixed.some(m => m.page === 4), mixed, 'no 4');
 
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
