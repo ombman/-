@@ -10,8 +10,9 @@
     "test:sheet": "node run-sheet.mjs",
     "test:leak": "node run-leak.mjs",
     "test:admin": "node run-admin.mjs",
-    "test:all": "node run.mjs && node run-list.mjs && node run-sheet.mjs && node run-leak.mjs && node run-admin.mjs && node run-columns.mjs && node run-scan.mjs",
-    "test:scan": "node run-scan.mjs"
+    "test:all": "node run.mjs && node run-list.mjs && node run-sheet.mjs && node run-leak.mjs && node run-admin.mjs && node run-columns.mjs && node run-scan.mjs && node run-ocr.mjs",
+    "test:scan": "node run-scan.mjs",
+    "test:ocr": "node run-ocr.mjs"
   },
   "dependencies": {
     "html-minifier-terser": "^7.2.0",
@@ -19,6 +20,8 @@
     "playwright": "1.56.1"
   },
   "devDependencies": {
-    "html-minifier-terser": "7.2.0"
+    "@tesseract.js-data/jpn": "^1.0.0",
+    "html-minifier-terser": "7.2.0",
+    "tesseract.js": "^5.1.1"
   }
 }

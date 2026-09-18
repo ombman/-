@@ -12,3 +12,4 @@ test/fixtures/list/*.pdf
 test/_*.mjs
 test/_*.py
 test/fixtures/list/_mk_sheet.py
+test/fixtures/list/_scan_page.png

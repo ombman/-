@@ -351,7 +351,12 @@ var CONFIG = {
   FALLBACK_PASSWORD: 'Jmt2sB9fxDWbreIysO',
   BRIDGE_TIMEOUT_MS: 4000,
   /* pdf.js の配信元。日本語（CIDフォント）PDFの読み取りに cmaps / standard_fonts が必須 */
-  PDFJS_BASE: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/'
+  PDFJS_BASE: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/',
+  /* スキャン資料（文字データの無いPDF）を画像から読み取るための文字認識エンジン */
+  TESS_JS:     'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
+  TESS_WORKER: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
+  TESS_CORE:   'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1/',
+  TESS_LANG:   'https://cdn.jsdelivr.net/npm/@tesseract.js-data/jpn@1.0.0/4.0.0/'
 };
 
 /* ⑥⑦ すべての LINE ボタンにリンクを適用 */
@@ -409,12 +414,12 @@ var REDACT_RULES = [
   /* 業種を表す語尾。物件そのものを指す語（中古住宅・一戸建住宅など）は
      PROTECT_WORDS で除外しているため消えない。 */
   { label: '会社名',        strong: true, re: /[^\s　、。，,\n\/／|｜:：]{1,14}(?:不動産販売|不動産流通|不動産|住宅販売|ハウジング|リアルエステート|エステート|地所|興産|殖産|工務店|供給公社|コミュニティ|パートナーズ|ソリューションズ|ビルディング|アーバン)(?=\s|$|[、。，,\n\/／|｜）)])/g },
-  { label: '担当者・窓口',   strong: true, re: /(?:担当者名|担当者|ご担当|担当|窓口|取扱店|取扱主任者|宅地建物取引士|宅建士|取引士|問合せ先|お問合せ先|お問い合わせ先|お問合わせ先|媒介業者|元付|客付)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{1,12}(?:[ 　][^\s　、。，,\n\/／|｜0-9]{1,12})?/g },
+  { label: '担当者・窓口',   strong: true, re: /(?:担当者名|担当者|ご担当|担当|窓口|取扱店|取扱主任者|宅地建物取引士|宅建士|取引士|問合せ先|お問合せ先|お問い合わせ先|お問合わせ先|媒介業者|元付|客付)\s*[:：／\/・]?\s*[^\s　、。，,\n\/／|｜]{1,12}(?:[ 　][^\s　、。，,\n\/／|｜0-9]{1,12})?/g },
   /* 「担当：山田 太郎」のように姓と名の間に空白がある氏名の取りこぼしを拾う */
   { label: '担当者・窓口',   strong: true, re: /［削除済み］[ 　]*[^\s　、。，,\n\/／|｜0-9（(]{1,8}(?=[\s　、。，,\n（(]|$)/g },
   { label: '協会・団体',     strong: true, re: /[（(](?:公社|一社|公財|一財)[）)]\s*[^\s　、。，,\n\/／|｜]{0,20}/g },
   /* 以下は weak：社名が入りやすい欄だが、同じ行に物件情報が並ぶことがある */
-  { label: '会社名の欄',     strong: false, re: /(?:分譲会社|施工会社|設計会社|管理会社|売主|販売提携|販売代理|代理業者|取扱会社|所属協会|保証協会|宅建業免許|宅建免許)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{0,24}/g },
+  { label: '会社名の欄',     strong: false, re: /(?:売主|販売提携|販売代理|代理業者|取扱会社|所属協会|保証協会|宅建業免許|宅建免許)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{0,24}/g },
   { label: '所在地（事業者）', strong: false, re: /(?:本社|支店|営業所|店舗)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{0,24}/g }
 ];
 
@@ -425,6 +430,20 @@ var PROTECT_WORDS = [
   'ハウスクリーニング', 'ホームセキュリティ', 'ホームエレベーター',
   '建設中', '建設予定', '新築一戸建', '中古一戸建'
 ];
+/* 「分譲会社／◯◯建設株式会社」のように、物件そのものの属性として
+   書かれている会社名は情報元（掲載元の不動産会社）ではないため残す。
+   消すのは資料の出所を示す社名・連絡先だけ。
+   資料によっては「分 譲 会 社」のように1文字ずつ空いていることがあるため、
+   間の空白や改行を許して照合する。 */
+var ATTR_LABEL = '(?:分[\\s　]*譲|施[\\s　]*工|設[\\s　]*計|管[\\s　]*理|建[\\s　]*築)[\\s　]*会[\\s　]*社';
+var ATTR_COMPANY_LINE = new RegExp(ATTR_LABEL);
+/* 欄の値（社名）をまとめて取り出す。ラベルの次の1かたまりを値とみなす。 */
+var ATTR_COMPANY_PAIR = new RegExp(
+  '(' + ATTR_LABEL + '[\\s　]*[／\\/：:・]?[\\s　\\n]{0,3})' +
+  '([^\\s　、。，,\\n\\/／|｜]{1,28})', 'g');
+/* ただし同じ行に連絡先が並んでいれば、その行は情報元とみなして消す */
+var CONTACT_MARK = /(?:TEL|Tel|tel|FAX|Fax|ＴＥＬ|ＦＡＸ|℡|☎|電話|免許|担当|@|https?:\/\/|www\.)/;
+
 function isProtected(str) {
   for (var i = 0; i < PROTECT_WORDS.length; i++) {
     if (String(str).indexOf(PROTECT_WORDS[i]) !== -1) return true;
@@ -435,6 +454,16 @@ function isProtected(str) {
 function redact(text, extraWords) {
   var hits = {};
   var out = String(text == null ? '' : text);
+
+  /* 分譲会社・施工会社・設計会社・管理会社の欄は物件情報なので、
+     ルールを当てる前に退避しておき、最後に元へ戻す。 */
+  var keep = [];
+  ATTR_COMPANY_PAIR.lastIndex = 0;
+  out = out.replace(ATTR_COMPANY_PAIR, function (m, label, value) {
+    if (CONTACT_MARK.test(value)) return m;   /* 連絡先が混ざるものは通常どおり消す */
+    keep.push(value);
+    return label + '\u0001' + (keep.length - 1) + '\u0001';
+  });
 
   (extraWords || []).forEach(function (w) {
     w = String(w).trim();
@@ -454,6 +483,7 @@ function redact(text, extraWords) {
   });
 
   out = out.replace(new RegExp('(?:' + MASK.replace(/[\[\]]/g, '\\$&') + '\\s*){2,}', 'g'), MASK);
+  out = out.replace(/\u0001([0-9]+)\u0001/g, function (m, i) { return keep[Number(i)]; });
   return { text: out, hits: hits, total: Object.keys(hits).reduce(function (a, k) { return a + hits[k]; }, 0) };
 }
 
@@ -969,6 +999,9 @@ function isSensitiveText(str, extraWords) {
     var w = String(extraWords[i]).trim();
     if (w.length >= 2 && t.indexOf(w) !== -1) return true;
   }
+  /* 分譲会社・施工会社・設計会社・管理会社の欄は物件情報として残す。
+     ただし同じ行に電話番号などが並んでいれば情報元とみなして消す。 */
+  if (ATTR_COMPANY_LINE.test(t) && !CONTACT_MARK.test(t)) return false;
   /* 画像では strong（連絡先そのもの）だけを対象にする。
      「管理会社」欄のような weak まで行ごと消すと、
      同じ行に並ぶ物件情報まで巻き添えで消えるため。 */
@@ -1008,6 +1041,46 @@ function sampleBackground(ctx, x, y, w, h) {
   return 'rgb(' + mid(rs) + ',' + mid(gs) + ',' + mid(bs) + ')';
 }
 
+/* 指定範囲を背景色で塗り、文字のふちが薄く残っていないか確かめる。
+   残っていれば少しずつ広げて塗り直す（黒帯にはしない）。 */
+function paintOut(ctx, x, y, w, h, W, H) {
+  var col = sampleBackground(ctx, x, y, w, h);
+  var base = (col.match(/[0-9]+/g) || [255, 255, 255]).map(Number);
+  ctx.fillStyle = col;
+  ctx.fillRect(x, y, w, h);
+
+  for (var round = 0; round < 3; round++) {
+    var nx = Math.max(0, x - 2), ny = Math.max(0, y - 2);
+    var nw = Math.min(W - nx, w + (x - nx) + 2), nh = Math.min(H - ny, h + (y - ny) + 2);
+    if (!ringHasInk(ctx, nx, ny, nw, nh, x, y, w, h, base)) break;
+    x = nx; y = ny; w = nw; h = nh;
+    ctx.fillStyle = col;
+    ctx.fillRect(x, y, w, h);
+  }
+  return { x: x, y: y, w: w, h: h };
+}
+
+/* 塗った範囲のすぐ外側に文字の名残（背景と大きく違う画素）があるか。
+   表の罫線を巻き込み続けないよう、細い直線状のものは名残とみなさない。 */
+function ringHasInk(ctx, nx, ny, nw, nh, x, y, w, h, base) {
+  if (nw <= 0 || nh <= 0) return false;
+  var img = ctx.getImageData(nx, ny, nw, nh), d = img.data;
+  var hit = 0, total = 0;
+  for (var py = 0; py < nh; py++) {
+    for (var px = 0; px < nw; px++) {
+      var gx = nx + px, gy = ny + py;
+      if (gx >= x && gx < x + w && gy >= y && gy < y + h) continue;   /* 塗った内側 */
+      var i = (py * nw + px) * 4;
+      total++;
+      var diff = Math.abs(d[i] - base[0]) + Math.abs(d[i + 1] - base[1]) + Math.abs(d[i + 2] - base[2]);
+      if (diff > 150) hit++;
+    }
+  }
+  if (!total) return false;
+  /* 罫線なら外周のごく一部。文字の名残はもっと広い範囲に散る。 */
+  return hit / total > 0.22;
+}
+
 /* 1ページ分を描画し、情報元を消した画像を返す */
 function renderRedactedPage(page, extraWords, scale) {
   var viewport = page.getViewport({ scale: scale || 1.6 });
@@ -1020,6 +1093,7 @@ function renderRedactedPage(page, extraWords, scale) {
     .then(function () { return page.getTextContent(); })
     .then(function (content) {
       var H = canvas.height, W = canvas.width;
+      var ocrText = null;
 
       /* PDFは1行が複数の断片に分かれることがあり、「TEL：03-」「1234-5678」のように
          切れていると断片単位では検出できない。そこで同じ行の断片をまとめ、
@@ -1033,6 +1107,22 @@ function renderRedactedPage(page, extraWords, scale) {
         items.push({ str: it.str, x: tr[4], y: tr[5] - fh, w: fw, h: fh, cy: tr[5] });
       });
       items.sort(function (a, b) { return a.cy - b.cy || a.x - b.x; });
+
+      /* 文字データが無いページ（スキャン資料）は、画像から文字を読み取る。
+         読み取れれば、通常のページと同じ手順で情報元を消せる。 */
+      if (items.length < 8 && Ocr.available()) {
+        return Ocr.read(canvas).then(function (o) {
+          ocrText = o.text;
+          var ls = o.lines.map(function (l) {
+            return { cy: l.y + l.h, parts: [{ str: l.text, x: l.x, y: l.y, w: l.w, h: l.h, cy: l.y + l.h }] };
+          });
+          return finish(ls);
+        }).catch(function () { return finish(groupLines(items)); });
+      }
+      return finish(groupLines(items));
+
+      /* ---- ここから下は上の2通りから呼ばれる ---- */
+      function groupLines(items) {
 
       /* 販売図面は多段組みが多い。y座標だけでまとめると、
          右列の社名と左列の物件情報が同じ1行と見なされ、
@@ -1054,7 +1144,10 @@ function renderRedactedPage(page, extraWords, scale) {
         }
         lines.push({ cy: it.cy, parts: [it] });
       });
+      return lines;
+      }
 
+      function finish(lines) {
       var boxes = [];
       lines.forEach(function (ln) {
         var text = ln.parts.map(function (q) { return q.str; }).join('');
@@ -1081,11 +1174,11 @@ function renderRedactedPage(page, extraWords, scale) {
       /* 1) 下部にまとまった連絡先だけを切り取る。
             切り取る範囲に物件情報が1つでも入るなら切り取らない。 */
       var cutAt = H;
-      var lower = boxes.filter(function (b) { return b.y > H * 0.80; });
+      var lower = boxes.filter(function (b) { return b.y > H * 0.76; });
       if (lower.length >= 2) {
-        var top = Math.floor(Math.min.apply(null, lower.map(function (b) { return b.y; })) - 4);
+        var top = Math.floor(Math.min.apply(null, lower.map(function (b) { return b.y; })) - 6);
         var wouldLose = keepBoxes.filter(function (k) { return k.y >= top; }).length;
-        if (top > H * 0.80 && wouldLose === 0) { cutAt = top; cropped = H - cutAt; }
+        if (top > H * 0.76 && wouldLose === 0) { cutAt = top; cropped = H - cutAt; }
       }
 
       /* 2) 該当箇所だけを、その場所の背景色で塗る。
@@ -1098,8 +1191,7 @@ function renderRedactedPage(page, extraWords, scale) {
         var w = Math.min(W - x, b.w + pad * 2), h = Math.min(H - y, b.h + pad * 2);
         if (w <= 0 || h <= 0) return;
         if (w > W * 0.94 && h > H * 0.10) return;   /* 広すぎる範囲は安全のため塗らない */
-        ctx.fillStyle = sampleBackground(ctx, x, y, w, h);
-        ctx.fillRect(x, y, w, h);
+        paintOut(ctx, x, y, w, h, W, H);
       });
 
       /* 切り取り */
@@ -1113,8 +1205,10 @@ function renderRedactedPage(page, extraWords, scale) {
       return {
         dataUrl: out.toDataURL('image/jpeg', 0.72),
         width: out.width, height: out.height,
-        masked: masked, croppedPx: cropped
+        masked: masked, croppedPx: cropped,
+        ocrText: ocrText
       };
+      }
     });
 }
 
@@ -1143,6 +1237,132 @@ function renderRedactedPdf(file, extraWords) {
       return next();
     });
 }
+
+
+/* =================================================================
+   4-b. スキャン資料の文字認識（OCR）
+   文字データを持たないPDF（紙をスキャンしただけの資料）は、
+   ページ画像から文字を読み取る。読み取った文字は
+   　・物件情報の抽出（価格・徒歩・面積など）
+   　・情報元（社名・電話番号など）の位置特定と消去
+   の両方に使う。これが無いと、消すべき場所が分からないため
+   資料画像を掲載できない。
+   ================================================================= */
+/* 文字認識の結果を整える。
+   日本語の資料では次のような癖が出るため、判定の前に直しておく。
+   　・数字が丸数字（①②…）になる
+   　・文字と文字の間に空白が入る
+   　・「社」が「祀」「杜」などに化ける
+   　・桁区切りのカンマが小数点になる */
+function normalizeOcr(t) {
+  t = String(t == null ? '' : t);
+  /* ①〜⑳ は U+2460〜U+2473、⓪ は U+24EA */
+  t = t.replace(/[\u2460-\u2473]/g, function (ch) { return String(ch.charCodeAt(0) - 0x245F); })
+       .replace(/\u24EA/g, '0');
+  /* 全角の英数字・記号を半角に寄せる */
+  t = t.replace(/[０-９]/g, function (ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); });
+  /* 日本語のまわりの空白を取り除く（「徒 歩 4 分」→「徒歩4分」） */
+  t = t.replace(/[ \t]+(?=[^\x00-\x7F])/g, '').replace(/([^\x00-\x7F])[ \t]+/g, '$1');
+  /* 桁区切りのカンマが小数点に化けたものを戻す（5.880万円 → 5,880万円） */
+  t = t.replace(/([0-9])\.([0-9]{3})(?![0-9])/g, '$1,$2');
+  /* 社名まわりのよくある化け字 */
+  t = t.replace(/会[祀杜杏壮社]/g, '会社')
+       .replace(/株式会社/g, '株式会社')
+       .replace(/分[譲談]会社/g, '分譲会社')
+       .replace(/施[工エ]会社/g, '施工会社')
+       .replace(/国[士土]交通大臣/g, '国土交通大臣')
+       .replace(/管理[賀貸]/g, '管理費')
+       .replace(/[TtＴ][EeＥ][LlＬ]/g, 'TEL')
+       .replace(/[FfＦ][AaＡ][XxＸ]/g, 'FAX');
+  return t;
+}
+
+var Ocr = {
+  worker: null, loading: null, failed: false,
+  onStatus: null,
+  available: function () { return !this.failed; },
+  load: function () {
+    var self = this;
+    if (self.worker) return Promise.resolve(self.worker);
+    if (self.loading) return self.loading;
+    self.loading = new Promise(function (res, rej) {
+      if (window.Tesseract) return res();
+      var sc = document.createElement('script');
+      sc.src = CONFIG.TESS_JS;
+      sc.onload = function () { res(); };
+      sc.onerror = function () { rej(new Error('文字認識エンジンを読み込めませんでした')); };
+      document.head.appendChild(sc);
+    }).then(function () {
+      if (self.onStatus) self.onStatus('文字認識の辞書を読み込み中…（初回のみ時間がかかります）');
+      return window.Tesseract.createWorker('jpn', 1, {
+        workerPath: CONFIG.TESS_WORKER,
+        corePath: CONFIG.TESS_CORE,
+        langPath: CONFIG.TESS_LANG
+      });
+    }).then(function (w) {
+      self.worker = w;
+      return w;
+    }).catch(function (e) {
+      self.failed = true; self.loading = null;
+      throw e;
+    });
+    return self.loading;
+  },
+  /* canvas を読み取り、文字列と行ごとの位置を返す。
+     位置は渡した canvas の画素座標なので、そのまま塗りつぶしに使える。 */
+  read: function (canvas) {
+    return this.load().then(function (w) {
+      return w.recognize(canvas, {}, { text: true, blocks: true });
+    }).then(function (r) {
+      var d = (r && r.data) || {}, lines = [];
+      (d.blocks || []).forEach(function (b) {
+        (b.paragraphs || []).forEach(function (pg) {
+          (pg.lines || []).forEach(function (ln) {
+            var bb = ln.bbox || {};
+            var words = (ln.words || []).filter(function (w) { return w.text && w.text.trim() && w.bbox; });
+            if (!words.length) {
+              var txt = normalizeOcr(String(ln.text || '').replace(/\n/g, ''));
+              if (txt) lines.push({ text: txt, x: bb.x0, y: bb.y0, w: bb.x1 - bb.x0, h: bb.y1 - bb.y0 });
+              return;
+            }
+            /* 販売図面は左右2段組みが多く、文字認識では左右の列が
+               1行につながって返ってくる。大きく離れた箇所で切り、
+               列ごとに判定する（そうしないと右の社名を消すときに
+               左の物件情報まで巻き添えになる）。 */
+            var seg = null;
+            words.forEach(function (w) {
+              var wb = w.bbox, h = wb.y1 - wb.y0;
+              if (seg) {
+                var gap = wb.x0 - seg.x1;
+                if (gap <= Math.max(18, h * 2.0)) {
+                  seg.text += w.text;
+                  seg.x1 = Math.max(seg.x1, wb.x1);
+                  seg.y0 = Math.min(seg.y0, wb.y0);
+                  seg.y1 = Math.max(seg.y1, wb.y1);
+                  return;
+                }
+                push(seg);
+              }
+              seg = { text: w.text, x0: wb.x0, x1: wb.x1, y0: wb.y0, y1: wb.y1 };
+            });
+            if (seg) push(seg);
+
+            function push(sg) {
+              var txt = normalizeOcr(String(sg.text || ''));
+              if (!txt) return;
+              lines.push({ text: txt, x: sg.x0, y: sg.y0, w: sg.x1 - sg.x0, h: sg.y1 - sg.y0 });
+            }
+          });
+        });
+      });
+      return { text: normalizeOcr(String(d.text || '')), lines: lines };
+    });
+  },
+  stop: function () {
+    var w = this.worker; this.worker = null; this.loading = null;
+    if (w && w.terminate) { try { w.terminate(); } catch (e) {} }
+  }
+};
 
 /* =================================================================
    5. Wix（Velo）ブリッジ ／ 未接続時は localStorage
@@ -1405,8 +1625,8 @@ function handleFiles(fileList) {
       var rep = extractAll.lastReport || {};
       var detail = [];
       if (rep.noText) {
-        detail.push('うち <b>' + rep.noText + 'ページ</b>はスキャンされた画像で文字を取り出せません' +
-          '（項目は手入力、資料画像は目視確認のうえ掲載してください）');
+        detail.push('うち <b>' + rep.noText + 'ページ</b>はスキャンされた画像です。' +
+          'これから文字認識で読み取ります（初回は辞書の読み込みに数分かかることがあります）');
       }
       line.innerHTML = '✔ ' + esc(file.name) + '（' + (sections.length) + 'ページ）から <b>' +
         results.length + '件</b>を読み取りました' +
@@ -1421,14 +1641,29 @@ function handleFiles(fileList) {
         return renderRedactedPdf(file, ngWords()).then(function (imgs) {
           var byPage = {};
           imgs.forEach(function (im) { byPage[im.pageNo] = im; });
-          var attached = 0, cut = 0, painted = 0;
+          var attached = 0, cut = 0, painted = 0, ocred = 0, manual = 0;
           drafts.forEach(function (d) {
             var im = byPage[d.res.pageNo];
             if (!im || d.res.record.sourceFile !== file.name) return;
+
+            /* スキャンページでも、文字認識で読み取れていれば通常ページと同じ扱いにする。
+               読み取れた文字から物件情報を取り直し、情報元も位置を特定して消してある。 */
+            if (d.res.noText && im.ocrText && im.ocrText.replace(/\s/g, '').length >= 40) {
+              var re2 = extract(im.ocrText, ngWords());
+              re2.pageNo = d.res.pageNo;
+              re2.filled = filledCount(re2.record);
+              re2.record.sourceFile = d.res.record.sourceFile;
+              re2.ocr = true;
+              d.res = re2;
+              ocred++;
+            }
             d.res.sheet = im;
-            if (d.res.noText) {
-              /* 文字が無いページは自動で消せないため、既定では掲載しない */
+
+            if (d.res.noText && !d.res.ocr) {
+              /* 文字認識でも読み取れなかったページ。消すべき場所が分からないため、
+                 目視で確認してチェックを入れたときだけ掲載する。 */
               d.res.record.sheetImage = null;
+              manual++;
             } else {
               d.res.record.sheetImage = im.dataUrl;
               attached++; painted += im.masked;
@@ -1438,7 +1673,10 @@ function handleFiles(fileList) {
           line.innerHTML = line.innerHTML.replace(
             /<br><span class="spin"><\/span> 掲載用の資料画像を作成中…/,
             '<br>掲載用の資料画像を <b>' + attached + '件</b>作成しました' +
-            '（連絡先 ' + painted + ' 行を消去' + (cut ? '、' + cut + '件は下部の連絡先欄を切り取り' : '') + '）');
+            '（連絡先 ' + painted + ' 行を消去' + (cut ? '、' + cut + '件は下部の連絡先欄を切り取り' : '') + '）' +
+            (ocred ? '<br>スキャンされた <b>' + ocred + 'ページ</b>は文字認識で読み取りました' : '') +
+            (manual ? '<br><span style="color:var(--warn)">' + manual +
+              'ページは文字認識でも読み取れませんでした（手入力、資料画像は目視確認のうえ掲載）</span>' : ''));
           renderReview();
         });
       }
@@ -1481,7 +1719,9 @@ function renderReview() {
       '<div class="review" style="border:0;border-radius:0">' +
         '<div class="hd">③ 読み取り結果の確認：' + esc(r.sourceFile || '') +
           (d.res.pageNo ? '（' + d.res.pageNo + 'ページ目）' : '') +
-          (d.res.noText
+          (d.res.ocr
+            ? '<span class="tag unknown" style="margin-left:8px;background:#e7eff6;color:#1f5f8b">スキャン資料：文字認識で読み取り（要確認）</span>'
+            : d.res.noText
             ? '<span class="tag unknown" style="margin-left:8px;background:#fbeee8;color:#a84a24">スキャン画像：手入力が必要</span>'
             : d.res.filled === 0
             ? '<span class="tag unknown" style="margin-left:8px">未取得：手入力が必要</span>'

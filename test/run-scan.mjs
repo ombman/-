@@ -2,6 +2,7 @@
    実際の管理画面の動作で確かめる（文字が取り出せないスキャンページ込み） */
 import { chromium } from 'playwright';
 import fs from 'node:fs'; import http from 'node:http'; import path from 'node:path';
+import { routeOcr } from './ocr-route.mjs';
 const ROOT='/home/user/-/wix-embed', FIX='/home/user/-/test/fixtures/list';
 const FILE=process.env.WIDGET_FILE||'index.html';
 const PDFJS=path.join('/home/user/-/test','node_modules','pdfjs-dist');
@@ -19,6 +20,7 @@ await ctx.route('https://cdnjs.cloudflare.com/**',rt=>{
   const local=rel.startsWith('cmaps/')||rel.startsWith('standard_fonts/')?path.join(PDFJS,rel):path.join(PDFJS,'build',path.basename(rel));
   if(!fs.existsSync(local))return rt.fulfill({status:404,body:''});
   rt.fulfill({status:200,contentType:rel.startsWith('cmaps/')?'application/octet-stream':'text/javascript',body:fs.readFileSync(local)});});
+await routeOcr(ctx);
 const p=await ctx.newPage();
 p.on('pageerror',e=>console.log('PAGEERROR',e.message));
 await p.goto('http://127.0.0.1:8260/'+FILE+'?mode=admin');
@@ -44,28 +46,35 @@ ok('文字の無いページは「手入力が必要」の印が付く', raw.got
    raw.got.filter(g=>g.noText).map(g=>g.page).join(','));
 ok('テキストファイルの空ブロックは出さない', raw.textFileEmpty === 0, String(raw.textFileEmpty));
 
-/* ② 実際にドロップしたときの画面表示 */
+/* ② 実際にドロップしたときの画面表示（文字認識までひととおり動かす） */
 const ui = await p.evaluate(async () => {
   const buf = await (await fetch('/scanned.pdf')).arrayBuffer();
   const dt = new DataTransfer();
   dt.items.add(new File([buf],'scanned.pdf',{type:'application/pdf'}));
   document.getElementById('dz').dispatchEvent(new DragEvent('drop',{dataTransfer:dt,bubbles:true}));
   const t0 = Date.now();
-  while (Date.now()-t0 < 20000) {
-    const n = document.querySelectorAll('[data-act="publish"]').length;
-    if (n > 0 && !document.querySelector('#dropLog .spin')) return {
-      cards: n,
-      scanBadges: Array.prototype.filter.call(document.querySelectorAll('span.tag'), e => e.textContent.indexOf('スキャン画像') >= 0).length,
-      log: (document.getElementById('dropLog').textContent||'').replace(/\s+/g,' ').trim()
-    };
-    await new Promise(r=>setTimeout(r,200));
+  const count = (word) => Array.prototype.filter.call(
+    document.querySelectorAll('span.tag'), e => e.textContent.indexOf(word) >= 0).length;
+  while (Date.now()-t0 < 300000) {
+    const done = document.getElementById('dropLog').textContent.indexOf('作成しました') >= 0;
+    if (done) {
+      const cards = document.querySelectorAll('[data-act="publish"]').length;
+      const imgs = document.querySelectorAll('img.sheet-thumb').length;
+      return { cards, ocrBadges: count('文字認識'), manualBadges: count('手入力が必要'),
+               images: imgs,
+               log: (document.getElementById('dropLog').textContent||'').replace(/\s+/g,' ').trim() };
+    }
+    await new Promise(r=>setTimeout(r,300));
   }
-  return { cards:0, scanBadges:0, log:(document.getElementById('dropLog').textContent||'').trim() };
+  return { cards:0, ocrBadges:0, manualBadges:0, images:0,
+           log:(document.getElementById('dropLog').textContent||'').trim() };
 });
 console.log('\n画面のログ:', ui.log, '\n');
 ok('ドロップすると5ページ分の確認カードが出る', ui.cards === 5, `${ui.cards}枚`);
-ok('スキャンページには印が付いている', ui.scanBadges === 3, `${ui.scanBadges}件`);
-ok('エラーで止まらない', !/読み取れません|失敗|エラー/.test(ui.log), ui.log);
+ok('スキャンページ2枚を文字認識で読み取っている', ui.ocrBadges === 2, `${ui.ocrBadges}件`);
+ok('白紙ページだけが手入力あつかいになる', ui.manualBadges === 1, `${ui.manualBadges}件`);
+ok('読み取れたページには資料画像が付く', ui.images >= 4, `${ui.images}枚`);
+ok('エラーで止まらない', ui.log.indexOf('✖') === -1, ui.log.slice(0,120));
 
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
