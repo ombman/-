@@ -1722,8 +1722,9 @@ function handleFiles(fileList) {
             if (!im || d.res.record.sourceFile !== file.name) return;
 
             /* 文字認識の結果を、元の文字と合わせてもう一度読み取り直す。
-               片方にしか出てこない項目（価格だけ画像、面積だけ文字など）を拾うため。 */
-            if (im.ocrText && im.ocrText.replace(/\s/g, '').length >= 40) {
+               片方にしか出てこない項目（価格だけ画像、面積だけ文字など）を拾うため。
+               閾値を8文字に下げ、少ししか読み取れなくても活用する。 */
+            if (im.ocrText && im.ocrText.replace(/\s/g, '').length >= 8) {
               var merged = extract((d.res.rawText || '') + '\n' + im.ocrText, ngWords());
               merged.pageNo = d.res.pageNo;
               merged.filled = filledCount(merged.record);
@@ -1746,15 +1747,17 @@ function handleFiles(fileList) {
               d.res.record.sheetImage = null;
               d.res.tooBig = true;
               manual++;
-            } else if (d.res.noText && !d.res.ocr) {
-              /* 文字認識でも読み取れなかったページ。消すべき場所が分からないため、
-                 目視で確認してチェックを入れたときだけ掲載する。 */
-              d.res.record.sheetImage = null;
-              manual++;
             } else {
+              /* 必ず資料画像を掲載する。スキャンのみでOCRが取れなかったページも
+                 管理者が確認できるよう添付し、不要なら「掲載しない」で外してもらう。 */
               d.res.record.sheetImage = im.dataUrl;
               attached++; painted += im.masked;
               if (im.croppedPx > 0) cut++;
+              /* テキストが取れず、消去位置を確定できなかったページは目視確認を促す */
+              if (d.res.noText && !d.res.ocr) {
+                d.res.needsVisualCheck = true;
+                manual++;
+              }
             }
           });
           line.innerHTML = line.innerHTML.replace(
@@ -1833,25 +1836,22 @@ function renderReview() {
             '上の項目（価格・駅徒歩・築年数・面積・持分）だけが公開されます。</div>') +
         (r.sheetImage
           ? '<div style="margin:12px 14px 0">' +
+            (d.res.needsVisualCheck
+              ? '<div class="redact" style="background:#fff3e0;border-color:#e6a817;color:#7a5200;margin-bottom:8px">' +
+                '⚠ このページはスキャン画像のため文字位置を完全には確認できていません。' +
+                '会社名・連絡先などが写っていないか目視で確認してください。' +
+                '問題がある場合は下のチェックで掲載をオフにしてください。</div>'
+              : '') +
             '<div style="font-size:12.5px;color:var(--sub);margin-bottom:6px">' +
-            '④ ユーザー画面に載る資料画像（情報元は消去済み）' +
+            '④ ユーザー画面に載る資料画像' +
+            (d.res.needsVisualCheck ? '（目視確認推奨）' : '（情報元は消去済み）') +
             (d.res.sheet && d.res.sheet.croppedPx ? '　下部の連絡先欄は切り取り済み' : '') + '</div>' +
             '<img class="sheet-thumb" src="' + r.sheetImage + '" alt="掲載用の資料（クリックで拡大）" ' +
-            'style="max-width:100%;border:1px solid var(--line);border-radius:8px;display:block">' +
+            'style="max-width:100%;border:' + (d.res.needsVisualCheck ? '2px solid #e6a817' : '1px solid var(--line)') + ';border-radius:8px;display:block">' +
             '<label style="display:flex;gap:7px;align-items:center;margin-top:8px;font-size:13px">' +
             '<input type="checkbox" data-nosheet="' + d.id + '"> この資料画像は掲載しない</label>' +
             '</div>'
-          : (d.res.sheet
-            ? '<div style="margin:12px 14px 0">' +
-              '<div class="redact">このページはスキャンされた画像で、文字の位置が分からないため' +
-              '<b>自動では消去できません</b>。下の画像に会社名・連絡先が写っていないか確認し、' +
-              '問題なければ掲載を選んでください。</div>' +
-              '<img class="sheet-thumb" src="' + d.res.sheet.dataUrl + '" alt="資料（未消去・クリックで拡大）" ' +
-              'style="max-width:100%;border:2px solid var(--warn);border-radius:8px;display:block;margin-top:8px">' +
-              '<label style="display:flex;gap:7px;align-items:center;margin-top:8px;font-size:13px">' +
-              '<input type="checkbox" data-usesheet="' + d.id + '"> 目視で確認した。この資料画像を掲載する</label>' +
-              '</div>'
-            : '')) +
+          : '') +
         '<details class="raw"><summary>削除後のテキストを確認する（管理者のみ・公開されません）</summary><pre>' + esc(d.res.cleanText) + '</pre></details>' +
       '</div></div>';
   }).join('');
