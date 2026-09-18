@@ -403,7 +403,7 @@ var MASK = '［削除済み］';
 var REDACT_RULES = [
   { label: 'メールアドレス', strong: true, re: /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g },
   { label: 'URL',           strong: true, re: /(?:https?:\/\/|www\.)[^\s　"'<>）)]+/g },
-  { label: '電話・FAX番号',  strong: true, re: /(?:TEL|Tel|tel|FAX|Fax|fax|ＴＥＬ|ＦＡＸ|電話番号|電話|℡|☎|フリーダイヤル|フリーコール)\s*[:：]?\s*[0-9０-９][0-9０-９\-－ー\(\)（）\s]{6,}/g },
+  { label: '電話・FAX番号',  strong: true, re: /(?:TEL|Tel|tel|FAX|Fax|fax|ＴＥＬ|ＦＡＸ|電話番号|電話|℡|☎|フリーダイヤル|フリーコール)\s*[:：／/・]?\s*[0-9０-９][0-9０-９\-－ー\(\)（）\s]{6,}/g },
   { label: '電話・FAX番号',  strong: true, re: /0[0-9０-９]{1,4}[\-－ー\(（\s][0-9０-９]{1,4}[\-－ー\)）\s][0-9０-９]{3,4}/g },
   { label: '電話・FAX番号',  strong: true, re: /0(?:120|800)[\-－ー\s]?[0-9０-９]{2,3}[\-－ー\s]?[0-9０-９]{3,4}/g },
   { label: '宅建業免許番号',  strong: true, re: /(?:国土交通大臣|[^\s　]{2,4}(?:都|道|府|県)知事)\s*(?:免許)?\s*[\(（]?\s*[0-9０-９]{1,2}\s*[\)）]?\s*第?\s*[0-9０-９]{1,6}\s*号/g },
@@ -414,13 +414,13 @@ var REDACT_RULES = [
   /* 業種を表す語尾。物件そのものを指す語（中古住宅・一戸建住宅など）は
      PROTECT_WORDS で除外しているため消えない。 */
   { label: '会社名',        strong: true, re: /[^\s　、。，,\n\/／|｜:：]{1,14}(?:不動産販売|不動産流通|不動産|住宅販売|ハウジング|リアルエステート|エステート|地所|興産|殖産|工務店|供給公社|コミュニティ|パートナーズ|ソリューションズ|ビルディング|アーバン)(?=\s|$|[、。，,\n\/／|｜）)])/g },
-  { label: '担当者・窓口',   strong: true, re: /(?:担当者名|担当者|ご担当|担当|窓口|取扱店|取扱主任者|宅地建物取引士|宅建士|取引士|問合せ先|お問合せ先|お問い合わせ先|お問合わせ先|媒介業者|元付|客付)\s*[:：／\/・]?\s*[^\s　、。，,\n\/／|｜]{1,12}(?:[ 　][^\s　、。，,\n\/／|｜0-9]{1,12})?/g },
+  { label: '担当者・窓口',   strong: true, re: /(?:担当者名|担当者|ご担当|担当|窓口|取扱店|取扱主任者|宅地建物取引士|宅建士|取引士|問合せ先|お問合せ先|お問い合わせ先|お問合わせ先|媒介業者|元付|客付)\s*[:：／/・]?\s*[^\s　、。，,\n\/／|｜]{1,12}(?:[ 　][^\s　、。，,\n\/／|｜0-9]{1,12})?/g },
   /* 「担当：山田 太郎」のように姓と名の間に空白がある氏名の取りこぼしを拾う */
   { label: '担当者・窓口',   strong: true, re: /［削除済み］[ 　]*[^\s　、。，,\n\/／|｜0-9（(]{1,8}(?=[\s　、。，,\n（(]|$)/g },
   { label: '協会・団体',     strong: true, re: /[（(](?:公社|一社|公財|一財)[）)]\s*[^\s　、。，,\n\/／|｜]{0,20}/g },
   /* 以下は weak：社名が入りやすい欄だが、同じ行に物件情報が並ぶことがある */
-  { label: '会社名の欄',     strong: false, re: /(?:売主|販売提携|販売代理|代理業者|取扱会社|所属協会|保証協会|宅建業免許|宅建免許)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{0,24}/g },
-  { label: '所在地（事業者）', strong: false, re: /(?:本社|支店|営業所|店舗)\s*[:：]?\s*[^\s　、。，,\n\/／|｜]{0,24}/g }
+  { label: '会社名の欄',     strong: false, re: /(?:売主|販売提携|販売代理|代理業者|取扱会社|所属協会|保証協会|宅建業免許|宅建免許)\s*[:：／/・]?\s*[^\s　、。，,\n\/／|｜]{0,24}/g },
+  { label: '所在地（事業者）', strong: false, re: /(?:本社|支店|営業所|店舗)\s*[:：／/・]?\s*[^\s　、。，,\n\/／|｜]{0,24}/g }
 ];
 
 /* 物件そのものを指す語。社名らしく見えても絶対に消さない。 */
@@ -572,7 +572,7 @@ function pickWalk(t) {
   var best = null, station = null, m;
 
   /* 「〇〇駅 徒歩n分」を最優先。備考の「〇〇まで徒歩n分」を拾わないため */
-  var re = /([^\s、。,\n()]{1,20}?)\s*駅\s*(?:より|から)?\s*(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g;
+  var re = /([^\s、。,\n()（）『』「」【】]{1,20}?)\s*[』」）)\]】]*\s*駅\s*[』」）)\]】]*\s*(?:まで|より|から)?\s*[…‥・.、\s]*(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g;
   while ((m = re.exec(s))) {
     var v = num(m[2]);
     if (v != null && v > 0 && v <= 120 && (best == null || v < best)) {
@@ -656,7 +656,7 @@ function pickAge(t) {
 /* 3-5. 面積
    図面によって「専有面積 73.32㎡」とも「㎡73.32」とも書かれ、
    PDFからの抽出では順序が崩れることもあるため、㎡の値をすべて集めて選ぶ。 */
-var SQM_RE = /(?:([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?)[ \t]*(?:\u33a1|m2|m\u00b2|平米|平方メートル)|(?:\u33a1|m2|m\u00b2|平米)[ \t]*([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?))/g;
+var SQM_RE = /(?:([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?)[ \t]*(?:\u33a1|m2|m\u00b2|mr|rrf|nf|\u5e73\u7c73|\u5e73\u65b9\u30e1\u30fc\u30c8\u30eb)|(?:\u33a1|m2|m\u00b2|mr|rrf|nf|\u5e73\u7c73|\u5e73\u65b9\u30e1\u30fc\u30c8\u30eb)[ \t]*([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?))/g;
 /* 専有面積として採用しない文脈 */
 var AREA_NG = /敷地|土地|バルコニー|テラス|専用庭|トランク|総面積|坪|delivered/;
 
@@ -678,7 +678,7 @@ function pickArea(t, kind) {
   var pat = kind === 'floor'
     ? '(?:延べ?床面積|延面積|建物面積|床面積)'
     : '(?:専有面積|占有面積|専有部分の?面積|専有部分)';
-  var m = s.match(new RegExp(pat + '[^0-9]{0,10}([0-9,]+(?:\\.[0-9]+)?)\\s*(?:\u33a1|m2|m\u00b2|平米)'));
+  var m = s.match(new RegExp(pat + '[^0-9]{0,10}([0-9,]+(?:\\.[0-9]+)?)\\s*(?:\u33a1|m2|m\u00b2|mr|rrf|nf|\u5e73\u7c73|\u5e73\u65b9\u30e1\u30fc\u30c8\u30eb)'));
   if (m) {
     var v = num(m[1]);
     if (v != null && v >= 10 && v <= 400) return Math.round(v * 100) / 100;
@@ -737,20 +737,30 @@ function pickShare(t) {
 var NAME_NG = /万円|［削除済み］|[0-9]{3,}/;
 var NAME_HINT = /マンション|ハイツ|テラス|コート|レジデンス|ハウス|ヒルズ|パーク|タワー|ガーデン|プラウド|ワコーレ|グラン|シティ|ヴィラ|メゾン|パレス|ステージ|ビュー/;
 
+/* 「ダイアパレス甲子園 403号室」のような見出しから、
+   部屋番号や飾り記号を落として建物名だけにする */
+function trimName(v) {
+  return String(v || '')
+    .replace(/^[◆■▶◇□▷･・\s\u3000]+/, '')
+    .replace(/[\s\u3000]*[0-9]{1,4}\s*号\s*室?$/, '')
+    .replace(/[\s\u3000]{2,}/g, ' ')
+    .trim();
+}
+
 function pickName(t, type) {
   var s = tighten(t);
 
   /* ラベルのある図面（「建物名称 〇〇」） */
-  var m = s.match(/(?:建物名称|建物名|マンション名|物件名称|物件名|名称)\s*[:：]?\s*([^\n\r]{2,40})/);
+  var m = s.match(/(?:建物名称|建物名|マンション名|物件名称|物件名|名称)\s*[:：／/・]?\s*([^\n\r]{2,40})/);
   if (m) {
-    var v = m[1].trim().replace(/[\s\u3000]{2,}/g, ' ');
+    var v = trimName(m[1]);
     if (v && !NAME_NG.test(v) && v !== 'マンション') return v;
   }
 
   /* ラベルが無い図面：建物名らしい行のうち最も長いものを使う */
   var best = null;
   s.split(/\r?\n/).forEach(function (line) {
-    var v = line.trim();
+    var v = trimName(line);
     if (v.length < 4 || v.length > 30) return;
     if (NAME_NG.test(v) || /[:：]/.test(v)) return;
     if (!NAME_HINT.test(v)) return;
@@ -759,9 +769,10 @@ function pickName(t, type) {
   if (best) return best;
 
   /* それも無ければ所在地から組み立てる */
-  var loc = s.match(/(?:所在地|所在|住所)\s*[:：]?\s*([^\n\r]{2,40})/);
+  var loc = s.match(/(?:所在地|所在|住所)\s*[:：／/・]?\s*([^\n\r]{2,40})/);
   if (loc && !NAME_NG.test(loc[1])) {
-    return loc[1].trim() + 'の' + (type === 'mansion' ? 'マンション' : type === 'house' ? '戸建' : '物件');
+    var addr = loc[1].trim().replace(/^[、,:：・\-–—/／|｜◆■▶･]+/, '').trim();
+    if (addr) return addr + 'の' + (type === 'mansion' ? 'マンション' : type === 'house' ? '戸建' : '物件');
   }
   return null;
 }
@@ -773,33 +784,39 @@ function pickName(t, type) {
    会社名・連絡先・担当者名は黒塗りするのではなく、出力に一切含めない。
    下の DETAIL_FIELDS に無い項目は、安全かどうかに関わらず公開されない。 */
 var DETAIL_FIELDS = [
-  { label: '所在地', re: /(?:所在地|所在)\s*[:：]?\s*([^\n\r]{3,40})/,
+  { label: '所在地', re: /(?:所在地|所在)\s*[:：／/・]?\s*([^\n\r]{3,40})/,
     ok: /(?:都|道|府|県|市|区|郡|町|村)[^\n]{0,24}[0-9０-９一二三四五六七八九十]/ },
-  { label: '交通', re: /(?:交通|最寄り?)\s*[:：]?\s*([^\n\r]{3,40})/,
+  { label: '交通', re: /(?:交通|最寄り?)\s*[:：／/・]?\s*([^\n\r]{3,40})/,
     ok: /駅[^\n]{0,10}(?:徒歩|バス)[^\n]{0,6}[0-9]/ },
-  { label: '間取り', re: /間取り?\s*[:：]?\s*([^\n\r]{2,20})/,
+  { label: '間取り', re: /間取り?\s*[:：／/・]?\s*([^\n\r]{2,20})/,
     ok: /^[0-9０-９]{0,2}\s*[SLDKRＳＬＤＫＲ]{1,4}(?:\s*[+＋][^\s]{1,8})?$/ },
-  { label: '建物構造', re: /(?:建物構造|構造)\s*[:：]?\s*([^\n\r]{2,30})/,
+  /* 「3LDK+2WIC」のように、ラベル無しで単独に置かれている間取り */
+  { label: '間取り', re: /(?:^|\n)[\s\u3000]*([0-9]{1,2}\s*[SLDKRＳＬＤＫＲ]{1,4}(?:\s*[+＋][^\s\n]{1,10})?)[\s\u3000]*(?:\n|$)/,
+    ok: /^[0-9０-９]{1,2}\s*[SLDKRＳＬＤＫＲ]{1,4}(?:\s*[+＋][^\s]{1,10})?$/ },
+  { label: '建物構造', re: /(?:建物構造|構造(?:[・･\/／]\s*階数)?)\s*[:：／/・]?\s*([^\n\r]{2,30})/,
     ok: /造/, ng: /面積|築|間取|価格|持分|[0-9][SLDKRＳＬＤＫＲ]/ },
-  { label: '所在階', re: /(?:所在階|階数)\s*[:：]?\s*([^\n\r]{1,20})/, ok: /[0-9]\s*階/ },
-  { label: 'バルコニー面積', re: /バルコニー面積\s*[:：]?\s*([0-9.,]{2,8}\s*(?:\u33a1|m2|平米))/,
+  { label: '所在階', re: /(?:所在階|階数|所在階数)\s*[:：／/・]?\s*([^\n\r]{1,20})/,
+    ok: /[0-9]\s*階/, ng: /造|面積|価格/ },
+  /* 「9階建4階部分」のように構造の中に書かれている場合 */
+  { label: '所在階', re: /([0-9]{1,3}\s*階\s*部分)/, ok: /階/ },
+  { label: 'バルコニー面積', re: /バルコニー面積\s*[:：／/・]?\s*([0-9.,]{2,8}\s*(?:\u33a1|m2|m\u00b2|mr|rrf|nf|\u5e73\u7c73|\u5e73\u65b9\u30e1\u30fc\u30c8\u30eb))/,
     ok: /[0-9]/ },
-  { label: '土地面積', re: /(?:土地面積|敷地面積)\s*[:：]?\s*([0-9.,]{2,12}\s*(?:\u33a1|m2|平米))/,
+  { label: '土地面積', re: /(?:土地面積|敷地面積)\s*[:：／/・]?\s*([0-9.,]{2,12}\s*(?:\u33a1|m2|m\u00b2|mr|rrf|nf|\u5e73\u7c73|\u5e73\u65b9\u30e1\u30fc\u30c8\u30eb))/,
     ok: /[0-9]/ },
-  { label: '総戸数', re: /(?:総戸数|一棟の総?戸数)\s*[:：]?\s*([0-9,]{1,6}\s*戸)/, ok: /戸$/ },
-  { label: '管理費', re: /管理費\s*[:：]?\s*(?:月額)?\s*([0-9,]{3,9}\s*円(?:\s*[\/／]\s*月)?)/,
+  { label: '総戸数', re: /(?:総戸数|一棟の総?戸数)\s*[:：／/・]?\s*([0-9,]{1,6}\s*戸)/, ok: /戸$/ },
+  { label: '管理費', re: /管理費\s*[:：／/・]?\s*(?:月額)?\s*([0-9,]{3,9}\s*円(?:\s*[\/／]\s*月)?)/,
     ok: /円$|月$/ },
 
-  { label: '修繕積立金', re: /修繕積立金\s*[:：]?\s*(?:月額)?\s*([0-9,]{3,9}\s*円(?:\s*[\/／]\s*月)?)/,
+  { label: '修繕積立金', re: /修繕積立金\s*[:：／/・]?\s*(?:月額)?\s*([0-9,]{3,9}\s*円(?:\s*[\/／]\s*月)?)/,
     ok: /円$|月$/ },
-  { label: '用途地域', re: /用途地域\s*[:：]?\s*([^\n\r]{2,24})/, ok: /地域$/ },
-  { label: '土地権利', re: /土地権利\s*[:：]?\s*([^\n\r]{2,20})/,
+  { label: '用途地域', re: /用途地域\s*[:：／/・]?\s*([^\n\r]{2,24})/, ok: /地域$/ },
+  { label: '土地権利', re: /土地権利\s*[:：／/・]?\s*([^\n\r]{2,20})/,
     ok: /^(?:所有権|借地権|定期借地権|定期賃借権|旧法借地権)$/ },
-  { label: '現況', re: /現況\s*[:：]?\s*([^\n\r]{1,16})/,
+  { label: '現況', re: /現況\s*[:：／/・]?\s*([^\n\r]{1,16})/,
     ok: /^(?:空家|空室|居住中|賃貸中|入居中|使用中|更地|建築中|未完成)$/ },
-  { label: '引渡時期', re: /引渡し?時期\s*[:：]?\s*([^\n\r]{1,20})/,
+  { label: '引渡時期', re: /引渡し?時期\s*[:：／/・]?\s*([^\n\r]{1,20})/,
     ok: /^(?:相談|即時?|即入居可|予定|[0-9０-９]{1,4}\s*年[^\n]{0,10})$/, ng: /築/ },
-  { label: '建ぺい率／容積率', re: /(?:建ぺい率|建蔽率)[^\n\r]{0,4}容積率\s*[:：]?\s*([^\n\r]{2,24})/,
+  { label: '建ぺい率／容積率', re: /(?:建ぺい率|建蔽率)[^\n\r]{0,4}容積率\s*[:：／/・]?\s*([^\n\r]{2,24})/,
     ok: /[%％]/ }
 ];
 
@@ -813,7 +830,8 @@ function pickDetails(t) {
     var m = s.match(f.re);
     if (!m) return;
     var v = String(m[1]).replace(/[\s\u3000]+/g, ' ').trim()
-                        .replace(/[、,:：\-–—/／|｜]+$/, '').trim();
+                        .replace(/^[、,:：・\-–—/／|｜=＝＞>◆■▶･]+/, '')
+                        .replace(/[、,:：・\-–—/／|｜]+$/, '').trim();
     if (v.length < 1 || v.length > 40) return;
     if (UNSAFE_VALUE.test(v)) return;              /* 疑わしい値は載せない */
     if (f.ng && f.ng.test(v)) return;
@@ -864,7 +882,7 @@ function extract(rawText, extraWords) {
     else if (rec.floorArea != null) rec.type = 'house';
   }
 
-  return { record: rec, redaction: r, cleanText: t };
+  return { record: rec, redaction: r, cleanText: t, rawText: String(rawText == null ? '' : rawText) };
 }
 
 /* 物件が載っているページかどうか。
@@ -1081,8 +1099,40 @@ function ringHasInk(ctx, nx, ny, nw, nh, x, y, w, h, base) {
   return hit / total > 0.22;
 }
 
+/* 掲載できる大きさに収めて画像にする。
+   写真の多い販売図面はそのままだと大きくなりすぎ、保存時に弾かれて
+   「図面が出ない」状態になるため、収まるまで画質と大きさを落とす。 */
+var SHEET_BUDGET = 700000;   /* data URL の文字数の上限（保存側の上限900,000に余裕を持たせる） */
+function encodeWithinBudget(canvas) {
+  var quals = [0.72, 0.62, 0.52, 0.44, 0.36];
+  var cv = canvas, scale = 1, best = null;
+  for (var round = 0; round < 5; round++) {
+    for (var i = 0; i < quals.length; i++) {
+      var url = cv.toDataURL('image/jpeg', quals[i]);
+      if (!best || url.length < best.dataUrl.length) {
+        best = { dataUrl: url, width: cv.width, height: cv.height, quality: quals[i], scale: scale };
+      }
+      if (url.length <= SHEET_BUDGET) {
+        return { dataUrl: url, width: cv.width, height: cv.height, quality: quals[i], scale: scale, fits: true };
+      }
+    }
+    /* 画質を下げても収まらないので、大きさを2割ずつ小さくする */
+    scale *= 0.8;
+    var c2 = document.createElement('canvas');
+    c2.width = Math.max(320, Math.round(cv.width * 0.8));
+    c2.height = Math.max(220, Math.round(cv.height * 0.8));
+    var cx2 = c2.getContext('2d');
+    cx2.imageSmoothingQuality = 'high';
+    cx2.drawImage(cv, 0, 0, c2.width, c2.height);
+    cv = c2;
+    if (cv.width <= 360) break;
+  }
+  best.fits = best.dataUrl.length <= SHEET_BUDGET;
+  return best;
+}
+
 /* 1ページ分を描画し、情報元を消した画像を返す */
-function renderRedactedPage(page, extraWords, scale) {
+function renderRedactedPage(page, extraWords, scale, forceOcr) {
   var viewport = page.getViewport({ scale: scale || 1.6 });
   var canvas = document.createElement('canvas');
   canvas.width = Math.floor(viewport.width);
@@ -1110,14 +1160,29 @@ function renderRedactedPage(page, extraWords, scale) {
 
       /* 文字データが無いページ（スキャン資料）は、画像から文字を読み取る。
          読み取れれば、通常のページと同じ手順で情報元を消せる。 */
-      if (items.length < 8 && Ocr.available()) {
-        return Ocr.read(canvas).then(function (o) {
-          ocrText = o.text;
-          var ls = o.lines.map(function (l) {
-            return { cy: l.y + l.h, parts: [{ str: l.text, x: l.x, y: l.y, w: l.w, h: l.h, cy: l.y + l.h }] };
-          });
-          return finish(ls);
-        }).catch(function () { return finish(groupLines(items)); });
+      if ((items.length < 8 || forceOcr) && Ocr.available()) {
+        /* 文字認識は解像度で精度が大きく変わるため、読み取り用に
+           表示用より細かい画像をもう1枚だけ作って読ませる。 */
+        var zoom = 1.9;
+        if (viewport.width * zoom > 3800) zoom = 3800 / viewport.width;
+        if (zoom < 1) zoom = 1;
+        var vp2 = page.getViewport({ scale: viewport.scale * zoom });
+        var big = document.createElement('canvas');
+        big.width = Math.floor(vp2.width); big.height = Math.floor(vp2.height);
+        return page.render({ canvasContext: big.getContext('2d'), viewport: vp2 }).promise
+          .then(function () { return Ocr.read(big); })
+          .then(function (o) {
+            ocrText = o.text;
+            /* 読み取り用の画像は大きいので、位置を表示用の大きさに戻す */
+            var ls = o.lines.map(function (l) {
+              var x = l.x / zoom, y = l.y / zoom, w = l.w / zoom, h = l.h / zoom;
+              return { cy: y + h, parts: [{ str: l.text, x: x, y: y, w: w, h: h, cy: y + h }] };
+            });
+            /* 文字データもある場合は、その行も合わせて消す対象にする */
+            if (items.length >= 8) ls = ls.concat(groupLines(items));
+            return finish(ls);
+          })
+          .catch(function () { return finish(groupLines(items)); });
       }
       return finish(groupLines(items));
 
@@ -1202,9 +1267,12 @@ function renderRedactedPage(page, extraWords, scale) {
         c2.getContext('2d').drawImage(canvas, 0, 0, W, cutAt, 0, 0, W, cutAt);
         out = c2;
       }
+      var enc = encodeWithinBudget(out);
       return {
-        dataUrl: out.toDataURL('image/jpeg', 0.72),
-        width: out.width, height: out.height,
+        dataUrl: enc.dataUrl,
+        width: enc.width, height: enc.height,
+        fits: enc.fits !== false,
+        bytes: Math.round(enc.dataUrl.length * 0.75),
         masked: masked, croppedPx: cropped,
         ocrText: ocrText
       };
@@ -1213,7 +1281,7 @@ function renderRedactedPage(page, extraWords, scale) {
 }
 
 /* PDF全体のページ画像をつくる */
-function renderRedactedPdf(file, extraWords) {
+function renderRedactedPdf(file, extraWords, opts) {
   if (!window.pdfjsLib) return Promise.resolve([]);
   return file.arrayBuffer()
     .then(function (buf) {
@@ -1229,8 +1297,9 @@ function renderRedactedPdf(file, extraWords) {
       function next() {
         if (i > pdf.numPages) return Promise.resolve(out);
         var n = i++;
+        var force = !!(opts && opts.ocrPages && opts.ocrPages[n]);
         return pdf.getPage(n)
-          .then(function (pg) { return renderRedactedPage(pg, extraWords); })
+          .then(function (pg) { return renderRedactedPage(pg, extraWords, null, force); })
           .then(function (img) { img.pageNo = n; out.push(img); return next(); })
           .catch(function () { return next(); });   /* 1ページ失敗しても続ける */
       }
@@ -1638,7 +1707,13 @@ function handleFiles(fileList) {
 
       /* ④ 情報元を消したページ画像を作り、ページ番号で物件に結びつける */
       if (/\.pdf$/i.test(file.name)) {
-        return renderRedactedPdf(file, ngWords()).then(function (imgs) {
+        /* 文字が取れなかったページと、項目がそろわなかったページは
+           画像から文字認識で読み直す（文字データが一部しかない資料が多いため） */
+        var ocrPages = {};
+        results.forEach(function (r) {
+          if (r.noText || r.filled < 3) ocrPages[r.pageNo] = true;
+        });
+        return renderRedactedPdf(file, ngWords(), { ocrPages: ocrPages }).then(function (imgs) {
           var byPage = {};
           imgs.forEach(function (im) { byPage[im.pageNo] = im; });
           var attached = 0, cut = 0, painted = 0, ocred = 0, manual = 0;
@@ -1646,20 +1721,32 @@ function handleFiles(fileList) {
             var im = byPage[d.res.pageNo];
             if (!im || d.res.record.sourceFile !== file.name) return;
 
-            /* スキャンページでも、文字認識で読み取れていれば通常ページと同じ扱いにする。
-               読み取れた文字から物件情報を取り直し、情報元も位置を特定して消してある。 */
-            if (d.res.noText && im.ocrText && im.ocrText.replace(/\s/g, '').length >= 40) {
-              var re2 = extract(im.ocrText, ngWords());
-              re2.pageNo = d.res.pageNo;
-              re2.filled = filledCount(re2.record);
-              re2.record.sourceFile = d.res.record.sourceFile;
-              re2.ocr = true;
-              d.res = re2;
+            /* 文字認識の結果を、元の文字と合わせてもう一度読み取り直す。
+               片方にしか出てこない項目（価格だけ画像、面積だけ文字など）を拾うため。 */
+            if (im.ocrText && im.ocrText.replace(/\s/g, '').length >= 40) {
+              var merged = extract((d.res.rawText || '') + '\n' + im.ocrText, ngWords());
+              merged.pageNo = d.res.pageNo;
+              merged.filled = filledCount(merged.record);
+              merged.record.sourceFile = d.res.record.sourceFile;
+              /* 読み取れる項目が増えたときだけ置き換える（減らさない） */
+              if (merged.filled >= d.res.filled) {
+                merged.ocr = true;
+                merged.wasNoText = d.res.noText;
+                d.res = merged;
+              } else {
+                d.res.ocr = true;
+              }
+              if (d.res.filled > 0) d.res.noText = false;
               ocred++;
             }
             d.res.sheet = im;
 
-            if (d.res.noText && !d.res.ocr) {
+            if (im.fits === false) {
+              /* 画質を落としても大きすぎる資料。掲載すると保存時に弾かれるため付けない */
+              d.res.record.sheetImage = null;
+              d.res.tooBig = true;
+              manual++;
+            } else if (d.res.noText && !d.res.ocr) {
               /* 文字認識でも読み取れなかったページ。消すべき場所が分からないため、
                  目視で確認してチェックを入れたときだけ掲載する。 */
               d.res.record.sheetImage = null;
@@ -1674,7 +1761,7 @@ function handleFiles(fileList) {
             /<br><span class="spin"><\/span> 掲載用の資料画像を作成中…/,
             '<br>掲載用の資料画像を <b>' + attached + '件</b>作成しました' +
             '（連絡先 ' + painted + ' 行を消去' + (cut ? '、' + cut + '件は下部の連絡先欄を切り取り' : '') + '）' +
-            (ocred ? '<br>スキャンされた <b>' + ocred + 'ページ</b>は文字認識で読み取りました' : '') +
+            (ocred ? '<br><b>' + ocred + 'ページ</b>は画像から文字認識で読み直しました' : '') +
             (manual ? '<br><span style="color:var(--warn)">' + manual +
               'ページは文字認識でも読み取れませんでした（手入力、資料画像は目視確認のうえ掲載）</span>' : ''));
           renderReview();
@@ -2041,7 +2128,7 @@ window.__RE = {
   renderRedactedPdf: renderRedactedPdf, isSensitiveText: isSensitiveText, pickPrice: pickPrice, pickWalk: pickWalk,
   tighten: tighten, looksLikeProperty: looksLikeProperty,
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
-  priceLabel: priceLabel, applyMode: applyMode, CONFIG: CONFIG
+  priceLabel: priceLabel, applyMode: applyMode, encodeWithinBudget: encodeWithinBudget, SHEET_BUDGET: SHEET_BUDGET, CONFIG: CONFIG
 };
 </script>
 </body>

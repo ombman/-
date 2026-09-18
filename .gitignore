@@ -13,3 +13,4 @@ test/_*.mjs
 test/_*.py
 test/fixtures/list/_mk_sheet.py
 test/fixtures/list/_scan_page.png
+test/fixtures/list/_noise.png
