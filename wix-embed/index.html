@@ -848,7 +848,10 @@ function pickDetails(t) {
 function extract(rawText, extraWords) {
   var r = redact(rawText, extraWords);
   var t = r.text;
+  /* 削除後のテキストと元テキスト両方でスコアリングし、高い方を採用する */
   var d = detectType(t);
+  var dRaw = detectType(String(rawText == null ? '' : rawText));
+  if (dRaw.score > d.score) d = dRaw;
   var type = d.type;
   var walk = pickWalk(t);
   var age = pickAge(t);
@@ -880,6 +883,13 @@ function extract(rawText, extraWords) {
     rec.share = pickShare(t);
     if (rec.ownArea != null || rec.share != null) rec.type = 'mansion';
     else if (rec.floorArea != null) rec.type = 'house';
+    /* 面積でも判定できない場合、物件名・テキストにマンション系語句があれば mansion とする */
+    else if (NAME_HINT.test(t) || (rec.name && NAME_HINT.test(rec.name))) rec.type = 'mansion';
+  }
+
+  /* 「戸建」系の語が一切なく、マンション系の語が物件名・テキストに含まれるなら mansion に補正 */
+  if (rec.type === 'house' && d.score <= 2) {
+    if (NAME_HINT.test(t) && !/戸建|一戸建|新築住宅|延[床べ]/.test(t)) rec.type = 'mansion';
   }
 
   return { record: rec, redaction: r, cleanText: t, rawText: String(rawText == null ? '' : rawText) };
@@ -1787,7 +1797,10 @@ function renderReview() {
   area.innerHTML = drafts.map(function (d) {
     var r = d.res.record, req = requiredKeys(r.type);
     var rows = '';
-    rows += '<div class="row"><label>種別</label><select data-f="type" data-id="' + d.id + '">' +
+    var isUnknownType = (r.type !== 'house' && r.type !== 'mansion');
+    rows += '<div class="row"><label>種別' + (isUnknownType ? ' <span style="color:var(--warn);font-size:12px">※必ず選択してください</span>' : '') + '</label>' +
+      '<select data-f="type" data-id="' + d.id + '" style="' + (isUnknownType ? 'border:2px solid var(--warn)' : '') + '">' +
+      (isUnknownType ? '<option value="" disabled selected>― 種別を選択してください ―</option>' : '') +
       ['house', 'mansion'].map(function (t) {
         return '<option value="' + t + '"' + (r.type === t ? ' selected' : '') + '>' + TYPE_LABEL[t] + '</option>';
       }).join('') + '</select></div>';
