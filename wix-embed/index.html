@@ -1209,22 +1209,14 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         var vp2 = page.getViewport({ scale: viewport.scale * zoom });
         var big = document.createElement('canvas');
         big.width = Math.floor(vp2.width); big.height = Math.floor(vp2.height);
-        return page.render({ canvasContext: big.getContext('2d'), viewport: vp2 }).promise
-          .then(function () {
-            /* カラー背景（赤地の白文字など）はグレースケール化してコントラストを上げる。
-               これにより Tesseract が色に依存せず明度差だけで文字を判定できる。 */
-            var gcx = big.getContext('2d');
-            var id = gcx.getImageData(0, 0, big.width, big.height);
-            var d = id.data;
-            for (var pi = 0; pi < d.length; pi += 4) {
-              var gray = Math.round(0.299 * d[pi] + 0.587 * d[pi+1] + 0.114 * d[pi+2]);
-              /* コントラスト強調：中間値から離すことで薄い文字を見やすくする */
-              gray = gray < 128 ? Math.max(0, gray - 30) : Math.min(255, gray + 30);
-              d[pi] = d[pi+1] = d[pi+2] = gray;
-            }
-            gcx.putImageData(id, 0, 0);
-            return Ocr.read(big);
-          })
+        var bcx = big.getContext('2d');
+        /* カラー背景（赤地の白文字など）をグレースケール化してコントラストを上げる。
+           色に依存せず明度差だけで文字を判定できるようになる。
+           canvas の filter で描画時に処理するため、画素を1つずつ走査する方式と違い
+           1ページあたりの追加時間がほぼ無い（スキャン資料は枚数が多いため重要）。 */
+        if ('filter' in bcx) bcx.filter = 'grayscale(1) contrast(1.35)';
+        return page.render({ canvasContext: bcx, viewport: vp2 }).promise
+          .then(function () { return Ocr.read(big); })
           .then(function (o) {
             ocrText = o.text;
             /* 読み取り用の画像は大きいので、位置を表示用の大きさに戻す */
@@ -1348,13 +1340,21 @@ function renderRedactedPdf(file, extraWords, opts) {
     })
     .then(function (pdf) {
       var out = [], i = 1;
+      /* onPage：1ページ終わるたびに呼ぶ。スキャン資料は文字認識に
+         1ページ数秒かかるため、全ページ待つと数分画面が止まって見える。
+         ページ単位で呼び出し側に渡し、その場で確認画面へ反映させる。 */
+      var onPage = opts && opts.onPage;
       function next() {
         if (i > pdf.numPages) return Promise.resolve(out);
         var n = i++;
         var force = !!(opts && opts.ocrPages && opts.ocrPages[n]);
         return pdf.getPage(n)
           .then(function (pg) { return renderRedactedPage(pg, extraWords, null, force); })
-          .then(function (img) { img.pageNo = n; out.push(img); return next(); })
+          .then(function (img) {
+            img.pageNo = n; out.push(img);
+            if (onPage) { try { onPage(img, n, pdf.numPages); } catch (e) {} }
+            return next();
+          })
           .catch(function () { return next(); });   /* 1ページ失敗しても続ける */
       }
       return next();
@@ -1767,13 +1767,15 @@ function handleFiles(fileList) {
         results.forEach(function (r) {
           if (r.noText || r.filled < 3) ocrPages[r.pageNo] = true;
         });
-        return renderRedactedPdf(file, ngWords(), { ocrPages: ocrPages }).then(function (imgs) {
-          var byPage = {};
-          imgs.forEach(function (im) { byPage[im.pageNo] = im; });
-          var attached = 0, cut = 0, painted = 0, ocred = 0, manual = 0;
-          drafts.forEach(function (d) {
-            var im = byPage[d.res.pageNo];
-            if (!im || d.res.record.sourceFile !== file.name) return;
+        var attached = 0, cut = 0, painted = 0, ocred = 0, manual = 0, done = 0;
+
+        /* 1ページ分の資料画像と文字認識結果を、その場でドラフトに取り込む。
+           項目が増えたときだけ true を返し、確認画面の描き直しを最小限にする。 */
+        function applyPage(im) {
+          var changed = false;
+          for (var di = 0; di < drafts.length; di++) {
+            var d = drafts[di];
+            if (d.res.pageNo !== im.pageNo || d.res.record.sourceFile !== file.name) continue;
 
             /* 文字認識の結果を、元の文字と合わせてもう一度読み取り直す。
                片方にしか出てこない項目（価格だけ画像、面積だけ文字など）を拾うため。
@@ -1785,6 +1787,7 @@ function handleFiles(fileList) {
               merged.record.sourceFile = d.res.record.sourceFile;
               /* 読み取れる項目が増えたときだけ置き換える（減らさない） */
               if (merged.filled >= d.res.filled) {
+                if (merged.filled > d.res.filled) changed = true;
                 merged.ocr = true;
                 merged.wasNoText = d.res.noText;
                 d.res = merged;
@@ -1813,9 +1816,29 @@ function handleFiles(fileList) {
                 manual++;
               }
             }
-          });
-          line.innerHTML = line.innerHTML.replace(
-            /<br><span class="spin"><\/span> 掲載用の資料画像を作成中…/,
+            changed = true;   /* 資料画像が付いたので描き直す */
+            break;
+          }
+          return changed;
+        }
+
+        var PROG_RE = /<br><span class="spin"><\/span> 掲載用の資料画像を作成中…[^<]*/;
+        return renderRedactedPdf(file, ngWords(), {
+          ocrPages: ocrPages,
+          onPage: function (im, n, total) {
+            var changed = applyPage(im);
+            done++;
+            /* 進捗を出す。スキャン資料は1ページ数秒かかるため、
+               何ページ目まで終わったかが見えないと止まったように見える。
+               PROG_RE は次のタグまでを消して差し替えるので、
+               進捗の数字にタグを使うと古い表示が消えずに積み重なる。 */
+            line.innerHTML = line.innerHTML.replace(PROG_RE,
+              '<br><span class="spin"></span> 掲載用の資料画像を作成中… ' +
+              done + '／' + total + 'ページ');
+            if (changed) renderReview();
+          }
+        }).then(function () {
+          line.innerHTML = line.innerHTML.replace(PROG_RE,
             '<br>掲載用の資料画像を <b>' + attached + '件</b>作成しました' +
             '（連絡先 ' + painted + ' 行を消去' + (cut ? '、' + cut + '件は下部の連絡先欄を切り取り' : '') + '）' +
             (ocred ? '<br><b>' + ocred + 'ページ</b>は画像から文字認識で読み直しました' : '') +
