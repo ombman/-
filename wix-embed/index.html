@@ -454,16 +454,27 @@ function isProtected(str) {
 /* 帯情報＝販売図面の最下部にある業者欄。
    社名ロゴ・営業所・住所・電話・免許番号・担当者・取引態様・自社広告が
    1つの枠にまとまっており、物件情報は含まれない。ページごと切り取る。 */
-/* 帯であることを示す語。1つでもあればその範囲を帯とみなす */
+/* 帯であることを示す語。1つでもあればその範囲を帯とみなす。
+   「株式会社」「㈱」「〒」は分譲会社・施工会社・管理会社の欄や物件所在地にも
+   出るため入れない。それらで帯と誤判定すると備考欄まで切り落としてしまう。
+   ここに置くのは、掲載元の業者にしか現れない語だけ。 */
 var BAND_HINT = new RegExp([
-  'TEL', 'Tel', 'tel', 'FAX', 'Fax', '℡', '☎', '電話',
-  '免許', '担当', '取引態様', '媒介', '代理',
-  '営業所', '支店', '本店', '本社', '店',
-  '株式会社', '有限会社', '㈱', '㈲',
-  '報酬形態', '広告不可', '広告可',
-  '検索', '〒', '@', 'https?://', 'www\\.',
-  '不動産販売', '住宅販売', 'ハウジング'
+  'TEL', 'Tel', 'tel', 'FAX', 'Fax', '℡', '☎',
+  '免許', '知事\\s*[(（]', '国土交通大臣',
+  '担当', '取引態様', '媒介', '報酬形態',
+  '営業所', '支店', '本店',
+  '広告不可', '広告可', '検索',
+  '@', 'https?://', 'www\\.'
 ].join('|'));
+/* 帯として切り取ってよい範囲。実際の業者欄はページ高の5〜15%程度なので、
+   下から22%までに限る。これ以上切ると物件情報を巻き込む。 */
+var LIMIT = 0.78;
+/* 図面の免責文。「図面と現況が異なる場合は現況を優先します」のように
+   物件情報の語を含むが項目の値ではないため、帯を探すときは読み飛ばす。
+   備考欄も「※」で始まることが多いので、「※」だけでは免責文とみなさない
+   （「※上記専有面積にはMBを含みます」は物件情報なので読み飛ばさない）。 */
+var BAND_NOTE = /優先|ご了承|予告なく/;
+
 /* 帯の上端を求める。lines は {text, y} の配列、H はページの高さ（画素）。
    下端から上へ1行ずつ見て、物件情報の行に当たったところで止める。
    連絡先そのものではない行（報酬形態・取引態様・自社広告）を理由に
@@ -475,13 +486,18 @@ function findBandTop(lines, H) {
   var top = null, hasHint = false, cutTexts = [];
   for (var i = ordered.length - 1; i >= 0; i--) {
     var ln = ordered[i];
-    if (ln.y < H * 0.60) break;               /* 切りすぎ防止 */
-    if (BAND_STOP.test(ln.text)) break;       /* 物件情報に到達したら止める */
-    if (BAND_HINT.test(ln.text)) hasHint = true;
+    if (ln.y < H * LIMIT) break;              /* 切りすぎ防止 */
+    /* 「※図面と現況が異なる場合は現況を優先します」のような但し書きは、
+       帯のすぐ下や中に必ず入る。物件情報の語（現況・面積など）を含むが
+       項目の値ではないため、ここで止めると帯に届かず丸ごと残ってしまう。
+       止めずに読み飛ばし、帯の一部として切り取る。 */
+    if (!BAND_NOTE.test(ln.text) && BAND_STOP.test(ln.text)) break;
+    /* 「管理会社：◯◯㈱」のような物件の属性としての社名は帯の印にしない */
+    if (BAND_HINT.test(ln.text) && !ATTR_COMPANY_LINE.test(ln.text)) hasHint = true;
     top = ln.y; cutTexts.unshift(ln.text);
   }
-  /* 業者を示す語が1つも無ければ帯ではない（図面の注記など）ので切らない */
-  if (!hasHint || top == null || top <= H * 0.60) {
+  /* 業者を示す語が1つも無ければ帯ではない（但し書きだけの下部など）ので切らない */
+  if (!hasHint || top == null || top <= H * LIMIT) {
     return { cutAt: H, isBand: false, cutTexts: [] };
   }
   return { cutAt: Math.max(0, Math.floor(top - 6)), isBand: true, cutTexts: cutTexts };
@@ -825,14 +841,36 @@ function trimName(v) {
     .trim();
 }
 
+/* 文字認識が崩れた物件名を見分ける。
+   「ネオ・ディ甲子園高潮」が「杏nノ」になるように、スキャン資料では
+   物件名の欄が数文字の断片になることがある。そのまま採用すると
+   ユーザー画面に意味不明な名前が並ぶため、読み違いとみなして使わない。 */
+function looksBrokenName(v) {
+  var s = String(v || '').replace(/\s/g, '');
+  if (s.length <= 3) return true;
+  /* 日本語の中に半角小文字が1〜2字だけ混じるのは読み違いの跡 */
+  var lower = (s.match(/[a-z]/g) || []).length;
+  if (lower >= 1 && lower <= 2 && /[^\x00-\x7F][a-z]/.test(s) && !/[A-Z]/.test(s)) return true;
+  return false;
+}
+
 function pickName(t, type) {
   var s = tighten(t);
 
-  /* ラベルのある図面（「建物名称 〇〇」） */
-  var m = s.match(/(?:建物名称|建物名|マンション名|物件名称|物件名|名称)\s*[:：／/・]?\s*([^\n\r]{2,40})/);
-  if (m) {
+  /* ラベルのある図面（「建物名称 〇〇」）。
+     スキャン資料では同じラベルが複数あったり値が崩れたりするため、
+     候補をすべて集め、名前として成り立つものだけから選ぶ。 */
+  var re = /(?:建物名称|建物名|マンション名|物件名称|物件名|名称)\s*[:：／/・]?\s*([^\n\r]{2,40})/g;
+  var m, cands = [];
+  while ((m = re.exec(s))) {
     var v = trimName(m[1]);
-    if (v && !NAME_NG.test(v) && v !== 'マンション') return v;
+    if (v && !NAME_NG.test(v) && v !== 'マンション' && !looksBrokenName(v)) cands.push(v);
+  }
+  if (cands.length) {
+    /* 建物名らしい語を含むものを優先し、無ければ最も長いものを使う */
+    var hinted = cands.filter(function (c) { return NAME_HINT.test(c); });
+    var pool = hinted.length ? hinted : cands;
+    return pool.reduce(function (a, b) { return b.length > a.length ? b : a; });
   }
 
   /* ラベルが無い図面：建物名らしい行のうち最も長いものを使う */
@@ -1321,6 +1359,17 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
 
       var masked = boxes.length, cropped = 0;
 
+      /* 塗りつぶしの安全弁。
+         文字認識が崩れた資料では、物件情報の行まで情報元と誤判定され、
+         紙面の大半が塗りつぶされてしまうことがある（価格や面積まで消える）。
+         販売図面で連絡先が紙面の3分の1を占めることはないため、
+         それを超えたら判定が破綻しているとみなし、塗りつぶしを見送って
+         管理者の目視確認にまわす。行数ではなく面積で見るのは、
+         連絡先だけの資料（行数は少ないが割合は高い）を巻き込まないため。 */
+      var paintArea = boxes.reduce(function (sum, b) { return sum + b.w * b.h; }, 0);
+      var overPaint = paintArea > W * H * 0.34;
+      if (overPaint) { boxes = []; masked = 0; }
+
       /* 消す対象でない文字の位置。物件情報を巻き添えにしないための判定に使う */
       var keepBoxes = [];
       lines.forEach(function (ln) {
@@ -1384,6 +1433,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         fits: enc.fits !== false,
         bytes: Math.round(enc.dataUrl.length * 0.75),
         masked: masked, croppedPx: cropped,
+        overPaint: overPaint,   /* 塗りつぶしを見送った＝目視確認が必要 */
         ocrText: ocrText
       };
       }
@@ -1584,6 +1634,55 @@ var LS_NG = 'reLp.ngwords.v1';
 function lsRead() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch (e) { return []; } }
 function lsWrite(a) { try { localStorage.setItem(LS_KEY, JSON.stringify(a)); } catch (e) {} }
 
+/* 読み取り途中の下書きの保管庫。
+   資料が多いと文字認識に数分かかるため、その間ずっと画面を開いたままに
+   しておかないと作業が消えてしまう。下書きを自動で保存し、開き直したら
+   続きから再開できるようにする。
+   資料画像は1件で数百KBになり localStorage（5MB）に収まらないため
+   IndexedDB を使う。使えない環境では黙って保存を見送る。 */
+var DraftStore = (function () {
+  var DB = 'reLpDrafts', STORE = 'v1', KEY = 'current', timer = null;
+  function open() {
+    return new Promise(function (res, rej) {
+      if (!window.indexedDB) return rej(new Error('no idb'));
+      var rq = indexedDB.open(DB, 1);
+      rq.onupgradeneeded = function () {
+        if (!rq.result.objectStoreNames.contains(STORE)) rq.result.createObjectStore(STORE);
+      };
+      rq.onsuccess = function () { res(rq.result); };
+      rq.onerror = function () { rej(rq.error); };
+    });
+  }
+  function tx(mode, fn) {
+    return open().then(function (db) {
+      return new Promise(function (res, rej) {
+        var t = db.transaction(STORE, mode), st = t.objectStore(STORE), rq = fn(st);
+        t.oncomplete = function () { res(rq && rq.result); };
+        t.onerror = function () { rej(t.error); };
+      });
+    });
+  }
+  return {
+    /* 短い間に何度も呼ばれるため、まとめて1回だけ書く */
+    save: function (list) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(function () {
+        timer = null;
+        tx('readwrite', function (st) {
+          return st.put({ at: Date.now(), drafts: list }, KEY);
+        }).catch(function () {});
+      }, 800);
+    },
+    load: function () {
+      return tx('readonly', function (st) { return st.get(KEY); }).catch(function () { return null; });
+    },
+    clear: function () {
+      if (timer) { clearTimeout(timer); timer = null; }
+      return tx('readwrite', function (st) { return st.delete(KEY); }).catch(function () {});
+    }
+  };
+})();
+
 var Store = {
   mode: 'local',
   list: function () {
@@ -1717,6 +1816,7 @@ document.addEventListener('click', function (e) {
    7. 管理画面
    ================================================================= */
 var authToken = null, drafts = [], archive = [];
+var busyReading = false;   /* 資料の読み取り中は画面を閉じないよう引き止める */
 
 function ngWords() {
   return (document.getElementById('ngWords').value || '')
@@ -1791,6 +1891,7 @@ function handleFiles(fileList) {
     log.appendChild(line);
 
     var isPdf = /\.pdf$/i.test(file.name || '') || file.type === 'application/pdf';
+    busyReading = true;
     readAny(file).then(function (sections) {
       var all = (sections || []).join('\n');
       if (!isPdf && (!all || all.replace(/\s/g, '').length < 20)) {
@@ -1874,8 +1975,10 @@ function handleFiles(fileList) {
               d.res.record.sheetImage = im.dataUrl;
               attached++; painted += im.masked;
               if (im.croppedPx > 0) cut++;
+              /* 塗りつぶしが効きすぎて見送ったページも目視確認にまわす */
+              if (im.overPaint) { d.res.needsVisualCheck = true; manual++; }
               /* テキストが取れず、消去位置を確定できなかったページは目視確認を促す */
-              if (d.res.noText && !d.res.ocr) {
+              else if (d.res.noText && !d.res.ocr) {
                 d.res.needsVisualCheck = true;
                 manual++;
               }
@@ -1914,7 +2017,7 @@ function handleFiles(fileList) {
     }).catch(function (err) {
       line.className = 'err';
       line.innerHTML = '✖ ' + esc(file.name) + '：' + esc(err.message || String(err));
-    });
+    }).then(function () { busyReading = false; });
   });
 }
 
@@ -1923,6 +2026,8 @@ function renderReview() {
   var bar = document.getElementById('bulkBar');
   bar.hidden = drafts.length === 0;
   document.getElementById('bulkCount').textContent = drafts.length;
+  /* 画面を閉じても続きから作業できるよう、下書きを保管しておく */
+  DraftStore.save(drafts);
 
   var area = document.getElementById('reviewArea');
   area.innerHTML = drafts.map(function (d) {
@@ -2100,6 +2205,7 @@ document.getElementById('btnPublishAll').addEventListener('click', function () {
 });
 document.getElementById('btnDiscardAll').addEventListener('click', function () {
   if (!confirm('読み取った ' + drafts.length + ' 件をすべて破棄しますか？')) return;
+  DraftStore.clear();
   drafts = []; document.getElementById('bulkLog').innerHTML = ''; renderReview();
 });
 
@@ -2209,6 +2315,31 @@ document.getElementById('admRows').addEventListener('click', function (e) {
   Store.remove(id, authToken).then(refresh).catch(function (err) {
     e.target.disabled = false; alert('削除に失敗しました：' + (err.message || err));
   });
+});
+
+/* --- 前回の読み取り途中の下書きを戻す ---
+   資料が多いと文字認識に数分かかる。その途中で画面を閉じても
+   作業が消えないよう、保管しておいた下書きから再開できるようにする。 */
+DraftStore.load().then(function (saved) {
+  if (!saved || !saved.drafts || !saved.drafts.length || drafts.length) return;
+  drafts = saved.drafts;
+  renderReview();
+  var log = document.getElementById('dropLog');
+  if (log) {
+    var when = new Date(saved.at || Date.now());
+    var hh = ('0' + when.getHours()).slice(-2), mm = ('0' + when.getMinutes()).slice(-2);
+    var line = document.createElement('div');
+    line.className = 'ok';
+    line.innerHTML = '前回の読み取り結果 <b>' + saved.drafts.length + '件</b>を戻しました（' +
+      hh + ':' + mm + ' 時点）。続きから確認・掲載できます。';
+    log.insertBefore(line, log.firstChild);
+  }
+}).catch(function () {});
+
+/* 読み取りの途中で閉じようとしたら引き止める */
+window.addEventListener('beforeunload', function (e) {
+  if (!busyReading) return;
+  e.preventDefault(); e.returnValue = '';
 });
 
 /* --- 削除ワード --- */

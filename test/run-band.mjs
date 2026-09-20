@@ -61,8 +61,10 @@ console.log(`切り取られる行: ${JSON.stringify(r.cutTexts)}\n`);
 
 console.log('-- 帯情報を切り取る');
 ok('帯情報だと判定できている', r.isBand === true, String(r.isBand));
-ok('社名ロゴの行から切り取っている', r.cutAt <= 870 && r.cutAt > 800,
-   `${r.cutAt}px（社名は870px・注記は800px）`);
+/* 帯のすぐ上にある免責注記（「現況を優先させて頂きます」）は物件情報では
+   ないため、帯と一緒に切られてよい。その上の物件情報を守れていればよい。 */
+ok('物件情報の行より下だけを切っている', r.cutAt <= 870 && r.cutAt > 700,
+   `${r.cutAt}px（社名870px・免責注記800px・現況700px）`);
 ok('担当者名が切り取られている', r.cutTexts.some(t=>t.indexOf('永柳')>=0), r.cutTexts.join(' / '));
 ok('取引態様が切り取られている', r.cutTexts.some(t=>t.indexOf('専任媒介')>=0), '');
 ok('営業所・住所が切り取られている', r.cutTexts.some(t=>t.indexOf('西宮営業所')>=0)
@@ -79,7 +81,8 @@ ok('駅徒歩が残っている', kept.some(t=>t.indexOf('徒歩4分')>=0), '');
 ok('管理費が残っている', kept.some(t=>t.indexOf('14,260')>=0), '');
 ok('分譲会社・施工会社の欄は残っている',
    kept.some(t=>t.indexOf('全日空ビルディング')>=0) && kept.some(t=>t.indexOf('五洋建設')>=0), '');
-ok('図面下の注記は残っている', kept.some(t=>t.indexOf('現況を優先')>=0), '');
+ok('現況・引渡時期の欄が残っている', kept.some(t=>t.indexOf('空家')>=0), '');
+ok('設備の欄が残っている', kept.some(t=>t.indexOf('エレベーター')>=0), '');
 
 /* 帯が無いページを切ってしまわないこと */
 console.log('\n-- 帯が無いページは切らない');
@@ -100,6 +103,56 @@ const deep = await p.evaluate(({ PAGE_H }) => window.__RE.findBandTop([
 ], PAGE_H), { PAGE_H });
 ok('物件情報の行より下だけを切る', deep.cutAt > 880 && deep.isBand === true,
    `cutAt=${deep.cutAt}（管理費は880px）`);
+
+/* 実際の図面2種で確かめる。どちらも帯の下に但し書きが入っており、
+   但し書きで判定が止まると帯が丸ごと残ってしまう。 */
+console.log('\n-- 但し書きがあっても帯を切る（コンフィアンス不動産の図面）');
+const conf = await p.evaluate(({ PAGE_H }) => window.__RE.findBandTop([
+  { y: 260, text: 'マンション　名称　価格　万円　交通' },
+  { y: 720, text: 'リノベーション内容　周辺環境' },
+  { y: 880, text: 'CONFIANCE　大阪府知事(3)第55822号' },
+  { y: 895, text: '株式会社コンフィアンス不動産' },
+  { y: 910, text: '大阪市中央区北久宝寺町1-2-1 オーセンティック東船場303号' },
+  { y: 920, text: '物件確認はこちら　物件専用QRコード' },
+  { y: 930, text: 'TEL 06-6125-5801　info@confiance-f.co.jp' },
+  { y: 940, text: '取引態様　売主　報酬形態　正規' },
+  { y: 955, text: '※掲載図面と現況が異なる場合は現況優先となります。' },
+], PAGE_H), { PAGE_H });
+console.log(`   切り取り位置: ${conf.cutAt}px　帯と判定: ${conf.isBand}`);
+ok('帯だと判定できている', conf.isBand === true, String(conf.isBand));
+ok('社名ロゴの行から切っている', conf.cutAt <= 880 && conf.cutAt > 720,
+   `${conf.cutAt}px（社名880px・周辺環境720px）`);
+ok('TEL・メールが切り取られている',
+   conf.cutTexts.some(t=>t.indexOf('06-6125-5801')>=0)
+   && conf.cutTexts.some(t=>t.indexOf('confiance-f.co.jp')>=0), '');
+ok('免許番号が切り取られている', conf.cutTexts.some(t=>t.indexOf('第55822号')>=0), '');
+ok('「リノベーション内容・周辺環境」は残る',
+   conf.cutTexts.every(t=>t.indexOf('周辺環境')<0), '');
+
+console.log('\n-- 下部が物件情報で終わる図面は切らない（コスモハイツ甲子園口）');
+const cosmo = await p.evaluate(({ PAGE_H }) => window.__RE.findBandTop([
+  { y: 500, text: '築年月　昭和48年11月　総戸数　93戸' },
+  { y: 540, text: '管理形態　全部委託　施工会社　(株)熊谷組' },
+  { y: 580, text: '管理費　13,600 円/月　修繕積立金　15,800 円/月' },
+  { y: 620, text: '現況　空室　引渡日　即日' },
+  { y: 660, text: '駐車場　空無' },
+  { y: 700, text: '本体設備' },
+  { y: 740, text: '各戸設備　エアコン各部屋及びリビングに設置済み' },
+  { y: 790, text: '備考　※上記専有面積にはMB・物入2.56㎡含まれています' },
+  { y: 820, text: '※食洗器・浴室乾燥暖房・エアコン4基' },
+  { y: 850, text: '※管理会社：三菱地所コミュニティ㈱' },
+  { y: 880, text: '※101号室' },
+  { y: 930, text: '会員番号　　　　物件番号' },
+  { y: 960, text: '※図面と現況が異なる場合は、現状を優先します。' },
+], PAGE_H), { PAGE_H });
+console.log(`   切り取り位置: ${cosmo.cutAt}px　帯と判定: ${cosmo.isBand}`);
+const cosmoKept = t => cosmo.cutTexts.every(c => c.indexOf(t) < 0);
+ok('管理費は消えない', cosmoKept('13,600'), cosmo.cutTexts.join(' / '));
+ok('現況・引渡日は消えない', cosmoKept('空室'), '');
+ok('各戸設備は消えない', cosmoKept('エアコン各部屋'), '');
+ok('備考の専有面積の注記は消えない', cosmoKept('2.56'), '');
+ok('切り取りは下から22%以内', cosmo.cutAt === PAGE_H || cosmo.cutAt >= PAGE_H * 0.78,
+   `cutAt=${cosmo.cutAt}（下限 ${PAGE_H*0.78}px）`);
 
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
