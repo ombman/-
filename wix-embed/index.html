@@ -622,10 +622,11 @@ function pickAge(t) {
   if (m) { var a = num(m[1]); if (a != null && a <= 150) return { years: a, built: null }; }
 
   /* 西暦：「築」または「築年月」ラベルの近くにあるものだけを採用する。
-     備考欄の「平成19年4月24日付けで…」のような無関係な年月を拾わないため。 */
+     備考欄の「平成19年4月24日付けで…」のような無関係な年月を拾わないため。
+     「建設年月」「竣工年月」も築年月と同義として受け付ける。 */
   var pats = [
-    /((?:19|20)[0-9]{2})[^0-9]{0,10}?(?:([0-9]{1,2})\s*月)?[^0-9]{0,4}築/,
-    /築年月[^0-9]{0,10}((?:19|20)[0-9]{2})[^0-9]{0,6}(?:([0-9]{1,2})\s*月?)?/,
+    /((?:19|20)[0-9]{2})[^0-9]{0,10}?(?:([0-9]{1,2})\s*月)?[^0-9]{0,6}(?:築|建築|竣工)/,
+    /(?:築年月|建設年月|竣工年月)[^0-9]{0,10}((?:19|20)[0-9]{2})[^0-9]{0,6}(?:([0-9]{1,2})\s*月?)?/,
     /築[^0-9]{0,6}((?:19|20)[0-9]{2})[^0-9]{0,6}(?:([0-9]{1,2})\s*月)?/
   ];
   for (var i = 0; i < pats.length; i++) {
@@ -639,9 +640,9 @@ function pickAge(t) {
   m = s.match(/((?:19|20)[0-9]{2})[^築]{0,25}?([0-9]{1,2})\s*月\s*築/);
   if (m) { var r3 = ageFromYM(num(m[1]), num(m[2])); if (r3) return r3; }
 
-  /* 和暦：同じく「築」の近くのみ */
-  m = s.match(/築年月[^0-9]{0,10}(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?/)
-   || s.match(/(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?[^0-9]{0,4}築/);
+  /* 和暦：「築」「建築」「建設年月」「竣工年月」の近くのみ採用 */
+  m = s.match(/(?:築年月|建設年月|竣工年月)[^0-9]{0,10}(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?/)
+   || s.match(/(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*(?:([0-9]{1,2})\s*月)?[^0-9]{0,8}(?:築|建築|竣工|建設)/);
   if (m) {
     var y = m[2] === '元' ? 1 : num(m[2]);
     var r2 = ageFromYM(ERA[m[1]] + y, m[3] ? num(m[3]) : null);
@@ -1200,15 +1201,30 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
          読み取れれば、通常のページと同じ手順で情報元を消せる。 */
       if ((items.length < 8 || forceOcr) && Ocr.available()) {
         /* 文字認識は解像度で精度が大きく変わるため、読み取り用に
-           表示用より細かい画像をもう1枚だけ作って読ませる。 */
-        var zoom = 1.9;
+           表示用より細かい画像をもう1枚だけ作って読ませる。
+           zoom 2.5 ≒ 288 DPI（A4）で推奨 300 DPI に近づける。 */
+        var zoom = 2.5;
         if (viewport.width * zoom > 3800) zoom = 3800 / viewport.width;
         if (zoom < 1) zoom = 1;
         var vp2 = page.getViewport({ scale: viewport.scale * zoom });
         var big = document.createElement('canvas');
         big.width = Math.floor(vp2.width); big.height = Math.floor(vp2.height);
         return page.render({ canvasContext: big.getContext('2d'), viewport: vp2 }).promise
-          .then(function () { return Ocr.read(big); })
+          .then(function () {
+            /* カラー背景（赤地の白文字など）はグレースケール化してコントラストを上げる。
+               これにより Tesseract が色に依存せず明度差だけで文字を判定できる。 */
+            var gcx = big.getContext('2d');
+            var id = gcx.getImageData(0, 0, big.width, big.height);
+            var d = id.data;
+            for (var pi = 0; pi < d.length; pi += 4) {
+              var gray = Math.round(0.299 * d[pi] + 0.587 * d[pi+1] + 0.114 * d[pi+2]);
+              /* コントラスト強調：中間値から離すことで薄い文字を見やすくする */
+              gray = gray < 128 ? Math.max(0, gray - 30) : Math.min(255, gray + 30);
+              d[pi] = d[pi+1] = d[pi+2] = gray;
+            }
+            gcx.putImageData(id, 0, 0);
+            return Ocr.read(big);
+          })
           .then(function (o) {
             ocrText = o.text;
             /* 読み取り用の画像は大きいので、位置を表示用の大きさに戻す */
