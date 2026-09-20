@@ -451,6 +451,55 @@ function isProtected(str) {
   return false;
 }
 
+/* 帯情報＝販売図面の最下部にある業者欄。
+   社名ロゴ・営業所・住所・電話・免許番号・担当者・取引態様・自社広告が
+   1つの枠にまとまっており、物件情報は含まれない。ページごと切り取る。 */
+/* 帯であることを示す語。1つでもあればその範囲を帯とみなす */
+var BAND_HINT = new RegExp([
+  'TEL', 'Tel', 'tel', 'FAX', 'Fax', '℡', '☎', '電話',
+  '免許', '担当', '取引態様', '媒介', '代理',
+  '営業所', '支店', '本店', '本社', '店',
+  '株式会社', '有限会社', '㈱', '㈲',
+  '報酬形態', '広告不可', '広告可',
+  '検索', '〒', '@', 'https?://', 'www\\.',
+  '不動産販売', '住宅販売', 'ハウジング'
+].join('|'));
+/* 帯の上端を求める。lines は {text, y} の配列、H はページの高さ（画素）。
+   下端から上へ1行ずつ見て、物件情報の行に当たったところで止める。
+   連絡先そのものではない行（報酬形態・取引態様・自社広告）を理由に
+   切り取りを見送ると帯が丸ごと残るため、それらは帯の一部として扱う。 */
+function findBandTop(lines, H) {
+  var ordered = (lines || [])
+    .filter(function (l) { return l && String(l.text || '').replace(/\s/g, ''); })
+    .sort(function (a, b) { return a.y - b.y; });
+  var top = null, hasHint = false, cutTexts = [];
+  for (var i = ordered.length - 1; i >= 0; i--) {
+    var ln = ordered[i];
+    if (ln.y < H * 0.60) break;               /* 切りすぎ防止 */
+    if (BAND_STOP.test(ln.text)) break;       /* 物件情報に到達したら止める */
+    if (BAND_HINT.test(ln.text)) hasHint = true;
+    top = ln.y; cutTexts.unshift(ln.text);
+  }
+  /* 業者を示す語が1つも無ければ帯ではない（図面の注記など）ので切らない */
+  if (!hasHint || top == null || top <= H * 0.60) {
+    return { cutAt: H, isBand: false, cutTexts: [] };
+  }
+  return { cutAt: Math.max(0, Math.floor(top - 6)), isBand: true, cutTexts: cutTexts };
+}
+
+/* 物件情報を示す語。この行に当たったら切り取りをそこで止める（残す） */
+var BAND_STOP = new RegExp([
+  '価格', '万円', '総額', '面積', '㎡', 'm2',
+  '間取', 'LDK', 'DK', '居室',
+  '築年', '築月', '建築', '建設年', '竣工',
+  '徒歩', '駅', '交通', '路線',
+  '所在地', '所在階', '構造', '階建',
+  '管理費', '修繕', '積立', '敬地', '敷地',
+  '専有', 'バルコニー', '総戸数', '持分',
+  '現況', '引渡', '用途地域', '権利', '所有権',
+  '設備', '駐車場', 'ペット', '備考'
+].join('|'));
+
 function redact(text, extraWords) {
   var hits = {};
   var out = String(text == null ? '' : text);
@@ -1282,14 +1331,29 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         keepBoxes.push({ y: y0 });
       });
 
-      /* 1) 下部にまとまった連絡先だけを切り取る。
-            切り取る範囲に物件情報が1つでも入るなら切り取らない。 */
-      var cutAt = H;
-      var lower = boxes.filter(function (b) { return b.y > H * 0.76; });
-      if (lower.length >= 2) {
-        var top = Math.floor(Math.min.apply(null, lower.map(function (b) { return b.y; })) - 6);
-        var wouldLose = keepBoxes.filter(function (k) { return k.y >= top; }).length;
-        if (top > H * 0.76 && wouldLose === 0) { cutAt = top; cropped = H - cutAt; }
+      /* 1) 下部の帯情報（業者欄）をページごと切り取る。
+
+         帯には社名・電話・免許番号のほかに「報酬形態：分かれ」「取引態様：専任媒介」
+         「不動産会社様のサイト制作を承ります」など、連絡先そのものではない行も並ぶ。
+         それらを理由に切り取りを見送ると帯が丸ごと残ってしまうため、
+         下端から上へ1行ずつ見て、物件情報の行に当たったところで止める。 */
+      var band = findBandTop(lines.map(function (ln) {
+        return {
+          text: ln.parts.map(function (q) { return q.str; }).join(''),
+          y: Math.min.apply(null, ln.parts.map(function (q) { return q.y; }))
+        };
+      }), H);
+      var cutAt = band.cutAt;
+      if (cutAt < H) cropped = H - cutAt;
+
+      /* 予備：帯とは判定できなくても、下部に連絡先だけが固まっている場合は切る */
+      if (cutAt >= H) {
+        var lower = boxes.filter(function (b) { return b.y > H * 0.76; });
+        if (lower.length >= 2) {
+          var top = Math.floor(Math.min.apply(null, lower.map(function (b) { return b.y; })) - 6);
+          var wouldLose = keepBoxes.filter(function (k) { return k.y >= top; }).length;
+          if (top > H * 0.76 && wouldLose === 0) { cutAt = top; cropped = H - cutAt; }
+        }
       }
 
       /* 2) 該当箇所だけを、その場所の背景色で塗る。
@@ -2208,6 +2272,7 @@ window.__RE = {
   renderRedactedPdf: renderRedactedPdf, isSensitiveText: isSensitiveText, pickPrice: pickPrice, pickWalk: pickWalk,
   tighten: tighten, looksLikeProperty: looksLikeProperty,
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
+  findBandTop: findBandTop,
   priceLabel: priceLabel, applyMode: applyMode, encodeWithinBudget: encodeWithinBudget, SHEET_BUDGET: SHEET_BUDGET, CONFIG: CONFIG
 };
 </script>
