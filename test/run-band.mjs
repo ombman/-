@@ -154,6 +154,59 @@ ok('備考の専有面積の注記は消えない', cosmoKept('2.56'), '');
 ok('切り取りは下から22%以内', cosmo.cutAt === PAGE_H || cosmo.cutAt >= PAGE_H * 0.78,
    `cutAt=${cosmo.cutAt}（下限 ${PAGE_H*0.78}px）`);
 
+/* 社名ロゴは画像で位置が取れないため、文字の上端ちょうどで切ると
+   ロゴの上部や枠の罫線が残る。帯の上の行との中間で切れているか。 */
+console.log('\n-- 帯をきれいに切る（ロゴや枠線を残さない）');
+const logo = await p.evaluate(({ PAGE_H }) => window.__RE.findBandTop([
+  { y: 700, h: 14, text: '現況　空家　引渡時期　相談' },
+  { y: 880, h: 30, text: 'ウィル不動産販売' },
+  { y: 900, h: 12, text: '担当　永柳　取引態様　専任媒介' },
+  { y: 940, h: 12, text: '〒662-0834 西宮市南昭和町3-18' },
+], PAGE_H), { PAGE_H });
+console.log(`   切り取り位置: ${logo.cutAt}px（帯の最上行880px・その上の行は714pxで終わる）`);
+ok('帯の最上行より上で切っている', logo.cutAt < 880, `${logo.cutAt}px`);
+ok('上の物件情報は残している', logo.cutAt > 714, `${logo.cutAt}px（現況の行は714pxで終わる）`);
+
+/* 物件名の読み取り。スキャン資料では名前の欄が化けることがある */
+console.log('\n-- 化けた物件名を採用しない');
+const names = await p.evaluate(() => [
+  '物件名　團闢闔闠a x]オートロック対応マンション施工会社新井組',
+  '物件名　|を|プレステージ西宮香杯園Nニーg',
+  '物件名　杏nノ',
+  '建物名称　プレステージ西宮香枦園',
+  '建物名称　ネオ・ディ甲子園高潮',
+  '建物名称　ワコーレ夙川公園ザ・テラス',
+].map(t => window.__RE.extract(t, []).record.name));
+const shown = ['團闢闔闠…（記号と英字が混じる）','|を|プレステージ…','杏nノ',
+               'プレステージ西宮香枦園','ネオ・ディ甲子園高潮','ワコーレ夙川公園ザ・テラス'];
+shown.forEach((s,i)=>console.log(`   ${s} → ${JSON.stringify(names[i])}`));
+ok('記号と会社名が混じった化けを使わない', names[0] === null, JSON.stringify(names[0]));
+ok('先頭と末尾にゴミが付いた化けを使わない', names[1] === null, JSON.stringify(names[1]));
+ok('短すぎる化けを使わない', names[2] === null, JSON.stringify(names[2]));
+ok('正しい物件名は読み取れる', names[3] === 'プレステージ西宮香枦園', JSON.stringify(names[3]));
+ok('中黒を含む物件名も読み取れる', names[4] === 'ネオ・ディ甲子園高潮', JSON.stringify(names[4]));
+ok('長い物件名も読み取れる', names[5] === 'ワコーレ夙川公園ザ・テラス', JSON.stringify(names[5]));
+
+/* 指示したもの以外は消さないこと */
+console.log('\n-- 物件情報は消さない（消すのは情報元だけ）');
+const sens = await p.evaluate(() => [
+  ['専有面積　71.31㎡', false],
+  ['価格　3,490万円', false],
+  ['築年月　2000年7月　総戸数　33戸', false],
+  ['管理費　月額 14,260円　修繕積立金　月額 27,310円', false],
+  ['交通　阪急神戸線 夙川駅 徒歩4分', false],
+  ['間取り　3LDK', false],
+  ['用途地域　第一種中高層住居専用', false],
+  ['分譲会社　全日空ビルディング株式会社', false],
+  ['管理会社　日本ハウズイング株式会社 神戸支店', false],
+  ['株式会社コンフィアンス不動産　TEL 06-6125-5801', true],
+  ['担当　永柳　TEL 0798-62-3121', true],
+  ['info@confiance-f.co.jp', true],
+  ['大阪府知事(3)第55822号', true],
+].map(([t, want]) => ({ t, want, got: window.__RE.isSensitiveText(t, []) })));
+sens.forEach(s => ok((s.want ? '消す：' : '残す：') + s.t.slice(0,28), s.got === s.want,
+                     `判定=${s.got}`));
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
 process.exit(fail?1:0);

@@ -443,6 +443,9 @@ var ATTR_COMPANY_PAIR = new RegExp(
   '([^\\s　、。，,\\n\\/／|｜]{1,28})', 'g');
 /* ただし同じ行に連絡先が並んでいれば、その行は情報元とみなして消す */
 var CONTACT_MARK = /(?:TEL|Tel|tel|FAX|Fax|ＴＥＬ|ＦＡＸ|℡|☎|電話|免許|担当|@|https?:\/\/|www\.)/;
+/* 情報元（掲載元の不動産会社）を示す印。物件情報の語が混じっていても、
+   これがある行は情報元として扱う。 */
+var SOURCE_MARK = /株式会社|有限会社|（株）|\(株\)|㈱|㈲|国土交通大臣|知事\s*[(（]|第[0-9]{3,}号/;
 
 function isProtected(str) {
   for (var i = 0; i < PROTECT_WORDS.length; i++) {
@@ -483,15 +486,15 @@ function findBandTop(lines, H) {
   var ordered = (lines || [])
     .filter(function (l) { return l && String(l.text || '').replace(/\s/g, ''); })
     .sort(function (a, b) { return a.y - b.y; });
-  var top = null, hasHint = false, cutTexts = [];
+  var top = null, hasHint = false, cutTexts = [], above = null;
   for (var i = ordered.length - 1; i >= 0; i--) {
     var ln = ordered[i];
-    if (ln.y < H * LIMIT) break;              /* 切りすぎ防止 */
+    if (ln.y < H * LIMIT) { above = ln; break; }   /* 切りすぎ防止 */
     /* 「※図面と現況が異なる場合は現況を優先します」のような但し書きは、
        帯のすぐ下や中に必ず入る。物件情報の語（現況・面積など）を含むが
        項目の値ではないため、ここで止めると帯に届かず丸ごと残ってしまう。
        止めずに読み飛ばし、帯の一部として切り取る。 */
-    if (!BAND_NOTE.test(ln.text) && BAND_STOP.test(ln.text)) break;
+    if (!BAND_NOTE.test(ln.text) && BAND_STOP.test(ln.text)) { above = ln; break; }
     /* 「管理会社：◯◯㈱」のような物件の属性としての社名は帯の印にしない */
     if (BAND_HINT.test(ln.text) && !ATTR_COMPANY_LINE.test(ln.text)) hasHint = true;
     top = ln.y; cutTexts.unshift(ln.text);
@@ -500,7 +503,18 @@ function findBandTop(lines, H) {
   if (!hasHint || top == null || top <= H * LIMIT) {
     return { cutAt: H, isBand: false, cutTexts: [] };
   }
-  return { cutAt: Math.max(0, Math.floor(top - 6)), isBand: true, cutTexts: cutTexts };
+  /* 帯の枠線や社名ロゴは画像なので文字として位置が取れない。
+     文字の上端ちょうどで切るとロゴの上部や枠の罫線が残って雑に見えるため、
+     帯のすぐ上にある行の下端との中間で切る。上に行が無ければ少し広めに切る。 */
+  var cut = top - 6;
+  if (above) {
+    var bottom = above.y + (above.h || 0);
+    if (bottom < top) cut = (bottom + top) / 2;
+  } else {
+    cut = top - Math.max(8, (lines[0] && lines[0].h) || 10);
+  }
+  if (cut < H * LIMIT) cut = Math.max(H * LIMIT, top - 6);
+  return { cutAt: Math.max(0, Math.floor(cut)), isBand: true, cutTexts: cutTexts };
 }
 
 /* 物件情報を示す語。この行に当たったら切り取りをそこで止める（残す） */
@@ -828,7 +842,14 @@ function pickShare(t) {
 }
 
 /* 3-7. 物件名 */
-var NAME_NG = /万円|［削除済み］|[0-9]{3,}/;
+/* 物件名として採用してはいけない語。
+   設備の説明文や会社欄を物件名に拾わないため。 */
+var NAME_NG = new RegExp([
+  '万円', '［削除済］', '[0-9]{3,}',
+  '会社', 'オートロック', 'エレベーター',
+  '駐車場', '徒歩', '㎡', '[0-9]\\s*LDK', '間取',
+  '専有', '広告', '免許', 'TEL', 'FAX'
+].join('|'));
 var NAME_HINT = /マンション|ハイツ|テラス|コート|レジデンス|ハウス|ヒルズ|パーク|タワー|ガーデン|プラウド|ワコーレ|グラン|シティ|ヴィラ|メゾン|パレス|ステージ|ビュー/;
 
 /* 「ダイアパレス甲子園 403号室」のような見出しから、
@@ -847,10 +868,20 @@ function trimName(v) {
    ユーザー画面に意味不明な名前が並ぶため、読み違いとみなして使わない。 */
 function looksBrokenName(v) {
   var s = String(v || '').replace(/\s/g, '');
-  if (s.length <= 3) return true;
-  /* 日本語の中に半角小文字が1〜2字だけ混じるのは読み違いの跡 */
-  var lower = (s.match(/[a-z]/g) || []).length;
-  if (lower >= 1 && lower <= 2 && /[^\x00-\x7F][a-z]/.test(s) && !/[A-Z]/.test(s)) return true;
+  if (s.length <= 3 || s.length > 28) return true;
+  /* 「|を|プレステージ…」「…a x]オートロック…」のように、
+     読み違いでは物件名に入らない記号が混じる */
+  if (/[|\[\]{}<>\\^~`_=+*＝｜「」【】]/.test(s)) return true;
+  /* 日本語の中に半角英字が少しだけ混じるのも読み違いの跡。
+     「ブランズTOKYO」のようにまとまった英字は正しい名前なので残す。 */
+  var jp = (s.match(/[぀-ヿ一-鿿]/g) || []).length;
+  var en = (s.match(/[a-zA-Z]/g) || []).length;
+  if (jp > 0 && en > 0 && en <= 3) return true;
+  /* 常用しない漢字が続くのは読み違い（「團闢闔闠」など） */
+  if (/[一-鿿]{2,}/.test(s)) {
+    var rare = (s.match(/[閣-闿黑-鿿一-丏]/g) || []).length;
+    if (rare >= 2) return true;
+  }
   return false;
 }
 
@@ -878,7 +909,7 @@ function pickName(t, type) {
   s.split(/\r?\n/).forEach(function (line) {
     var v = trimName(line);
     if (v.length < 4 || v.length > 30) return;
-    if (NAME_NG.test(v) || /[:：]/.test(v)) return;
+    if (NAME_NG.test(v) || /[:：]/.test(v) || looksBrokenName(v)) return;
     if (!NAME_HINT.test(v)) return;
     if (best == null || v.length > best.length) best = v;
   });
@@ -1146,6 +1177,14 @@ function isSensitiveText(str, extraWords) {
   /* 分譲会社・施工会社・設計会社・管理会社の欄は物件情報として残す。
      ただし同じ行に電話番号などが並んでいれば情報元とみなして消す。 */
   if (ATTR_COMPANY_LINE.test(t) && !CONTACT_MARK.test(t)) return false;
+  /* 物件情報そのものの行（価格・面積・間取り・築年・駅徒歩・管理費など）は
+     消さない。文字認識が崩れた資料でこれらが情報元と誤判定され、
+     紙面から物件情報が消えてしまうのを防ぐ。
+     ただし社名・連絡先・免許番号など情報元を示す印がある行は、
+     物件情報の語がたまたま混じっていても消す
+     （「国土交通大臣（4）第7356号」の「交通」、
+     　「野村不動産（株）…2018年10月建築」の「建築」で守ってしまわないため）。 */
+  if (BAND_STOP.test(t) && !CONTACT_MARK.test(t) && !SOURCE_MARK.test(t)) return false;
   /* 画像では strong（連絡先そのもの）だけを対象にする。
      「管理会社」欄のような weak まで行ごと消すと、
      同じ行に並ぶ物件情報まで巻き添えで消えるため。 */
@@ -1372,8 +1411,12 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
          それを超えたら判定が破綻しているとみなし、塗りつぶしを見送って
          管理者の目視確認にまわす。行数ではなく面積で見るのは、
          連絡先だけの資料（行数は少ないが割合は高い）を巻き込まないため。 */
-      var paintArea = boxes.reduce(function (sum, b) { return sum + b.w * b.h; }, 0);
-      var overPaint = paintArea > W * H * 0.34;
+      /* 実際に塗る大きさは周囲の余白ぶん広がるので、それを含めて見積もる */
+      var paintArea = boxes.reduce(function (sum, b) {
+        var pd = Math.max(3, b.h * 0.3);
+        return sum + (b.w + pd * 2) * (b.h + pd * 2);
+      }, 0);
+      var overPaint = paintArea > W * H * 0.25;
       if (overPaint) { boxes = []; masked = 0; }
 
       /* 消す対象でない文字の位置。物件情報を巻き添えにしないための判定に使う */
@@ -1393,9 +1436,11 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
          それらを理由に切り取りを見送ると帯が丸ごと残ってしまうため、
          下端から上へ1行ずつ見て、物件情報の行に当たったところで止める。 */
       var band = findBandTop(lines.map(function (ln) {
+        var ty = Math.min.apply(null, ln.parts.map(function (q) { return q.y; }));
+        var by = Math.max.apply(null, ln.parts.map(function (q) { return q.y + q.h; }));
         return {
           text: ln.parts.map(function (q) { return q.str; }).join(''),
-          y: Math.min.apply(null, ln.parts.map(function (q) { return q.y; }))
+          y: ty, h: by - ty
         };
       }), H);
       var cutAt = band.cutAt;
@@ -2409,7 +2454,7 @@ window.__RE = {
   renderRedactedPdf: renderRedactedPdf, isSensitiveText: isSensitiveText, pickPrice: pickPrice, pickWalk: pickWalk,
   tighten: tighten, looksLikeProperty: looksLikeProperty,
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
-  findBandTop: findBandTop,
+  findBandTop: findBandTop, isSensitiveText: isSensitiveText,
   priceLabel: priceLabel, applyMode: applyMode, encodeWithinBudget: encodeWithinBudget, SHEET_BUDGET: SHEET_BUDGET, CONFIG: CONFIG
 };
 </script>
