@@ -1265,7 +1265,13 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
   canvas.height = Math.floor(viewport.height);
   var ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-  return page.render({ canvasContext: ctx, viewport: viewport }).promise
+  /* intent:'print' を指定する理由：
+     pdf.js は描画の続きを requestAnimationFrame で予約するが、管理画面を
+     開いたまま別のタブに移るとブラウザが画面の描画を止めるため、予約が
+     二度と実行されず資料画像の作成が途中で止まってしまう。
+     印刷向けの指定にすると予約を使わず順に描画するので、裏に回っていても
+     最後まで作りきれる。紙面をそのまま画像にする用途なので見た目は変わらない。 */
+  return page.render({ canvasContext: ctx, viewport: viewport, intent: 'print' }).promise
     .then(function () { return page.getTextContent(); })
     .then(function (content) {
       var H = canvas.height, W = canvas.width;
@@ -1302,7 +1308,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
            canvas の filter で描画時に処理するため、画素を1つずつ走査する方式と違い
            1ページあたりの追加時間がほぼ無い（スキャン資料は枚数が多いため重要）。 */
         if ('filter' in bcx) bcx.filter = 'grayscale(1) contrast(1.35)';
-        return page.render({ canvasContext: bcx, viewport: vp2 }).promise
+        return page.render({ canvasContext: bcx, viewport: vp2, intent: 'print' }).promise
           .then(function () { return Ocr.read(big); })
           .then(function (o) {
             ocrText = o.text;
