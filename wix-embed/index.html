@@ -1166,8 +1166,19 @@ function readAny(file) {
    いずれも黒い帯を残さず、元の紙面に見えるように仕上げる。
    ================================================================= */
 
-/* 伏せる対象かどうかを1つの文字列に対して判定する */
-function isSensitiveText(str, extraWords) {
+/* 読み違えようのない連絡先。数字や記号の並びなので、
+   文字認識でも形が崩れにくい。 */
+var STRONG_CONTACT = new RegExp([
+  '(?:TEL|Tel|FAX|Fax|℡|☎)[\\s:：]*[0-9(（]',
+  '0[0-9]{1,4}[-ー－\\s][0-9]{1,4}[-ー－\\s][0-9]{3,4}',
+  '@[A-Za-z0-9.-]+\\.[a-z]{2,}',
+  'https?://', 'www\\.',
+  '第[0-9]{3,}号'
+].join('|'));
+
+/* 伏せる対象かどうかを1つの文字列に対して判定する。
+   ocrOnly: 文字認識だけで読み取った行かどうか。 */
+function isSensitiveText(str, extraWords, ocrOnly) {
   var t = String(str || '');
   if (t.replace(/\s/g, '').length < 2) return false;
   for (var i = 0; i < (extraWords || []).length; i++) {
@@ -1185,6 +1196,15 @@ function isSensitiveText(str, extraWords) {
      （「国土交通大臣（4）第7356号」の「交通」、
      　「野村不動産（株）…2018年10月建築」の「建築」で守ってしまわないため）。 */
   if (BAND_STOP.test(t) && !CONTACT_MARK.test(t) && !SOURCE_MARK.test(t)) return false;
+  /* ここから先は文字認識だけで読んだ行の扱い。
+     読み違いが多く、物件情報の行を情報元と取り違えて紙面から情報を
+     消してしまうことがあるため、形が崩れにくいものだけを対象にする。
+     　・連絡先（電話番号・メール・URL・免許番号）＝数字と記号の並び
+     　・社名の「株式会社」「㈱」
+     細かい言い回しによる判定は、読み違えた文字で誤作動するので使わない。 */
+  if (ocrOnly) {
+    return STRONG_CONTACT.test(t) || /株式会社|有限会社|㈱|㈲|（株）|\(株\)/.test(t);
+  }
   /* 画像では strong（連絡先そのもの）だけを対象にする。
      「管理会社」欄のような weak まで行ごと消すと、
      同じ行に並ぶ物件情報まで巻き添えで消えるため。 */
@@ -1199,6 +1219,49 @@ function isSensitiveText(str, extraWords) {
     }
   }
   return false;
+}
+
+/* 紙面の下部にある業者帯を、文字ではなく見た目で探す。
+
+   帯は色地に白抜きの社名やロゴで作られることが多く、文字認識が届かない。
+   文字が読めないと帯だと分からず、そのまま残ってしまう。
+   そこで紙の余白（ほぼ白い横一行）を手がかりにする。帯と本文の間には
+   必ず余白があるので、下から上へ見ていき、内容が詰まった帯を通り過ぎて
+   最初に現れた余白で切る。
+
+   ink[y] はその行の「白ではない画素の割合」。
+   戻り値は切り取り位置（画素）。帯らしきものが無ければ null。 */
+function findBandByPixels(ctx, W, H) {
+  var from = Math.floor(H * 0.74);           /* 下から26%だけを見る */
+  if (from >= H - 8 || W < 8) return null;
+  var d;
+  try { d = ctx.getImageData(0, from, W, H - from).data; } catch (e) { return null; }
+  var rows = H - from, cols = Math.ceil(W / 3), ink = new Array(rows);
+  for (var y = 0; y < rows; y++) {
+    var n = 0, base = y * W * 4;
+    for (var x = 0; x < W; x += 3) {
+      var i = base + x * 4;
+      if (d[i] < 235 || d[i + 1] < 235 || d[i + 2] < 235) n++;
+    }
+    ink[y] = n / cols;
+  }
+  /* 帯の下端（内容が詰まっている行）を探す */
+  var bottom = null;
+  for (var y2 = rows - 1; y2 >= 0; y2--) {
+    if (ink[y2] > 0.12) { bottom = y2; break; }
+  }
+  if (bottom == null) return null;
+  /* そこから上へ、余白が続く場所（＝帯の上の隙間）を探す */
+  var need = Math.max(3, Math.round(H * 0.005)), run = 0, gap = null;
+  for (var y3 = bottom; y3 >= 0; y3--) {
+    if (ink[y3] < 0.02) { run++; if (run >= need) { gap = y3 + Math.floor(run / 2); break; } }
+    else run = 0;
+  }
+  if (gap == null) return null;
+  var cut = from + gap, cropped = H - cut;
+  /* 帯として不自然な大きさなら見送る */
+  if (cropped < H * 0.03 || cropped > H * 0.24) return null;
+  return cut;
 }
 
 /* 矩形の周囲から背景色を推定する（白地なら白、色地ならその色） */
@@ -1354,7 +1417,10 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
             /* 読み取り用の画像は大きいので、位置を表示用の大きさに戻す */
             var ls = o.lines.map(function (l) {
               var x = l.x / zoom, y = l.y / zoom, w = l.w / zoom, h = l.h / zoom;
-              return { cy: y + h, parts: [{ str: l.text, x: x, y: y, w: w, h: h, cy: y + h }] };
+              /* ocr:true ＝ 文字認識だけで読んだ行。読み違いが多いため、
+                 消す判定を厳しくする（isSensitiveText を参照）。 */
+              return { cy: y + h, ocr: true,
+                       parts: [{ str: l.text, x: x, y: y, w: w, h: h, cy: y + h }] };
             });
             /* 文字データもある場合は、その行も合わせて消す対象にする */
             if (items.length >= 8) ls = ls.concat(groupLines(items));
@@ -1394,7 +1460,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
       var boxes = [];
       lines.forEach(function (ln) {
         var text = ln.parts.map(function (q) { return q.str; }).join('');
-        if (!isSensitiveText(text, extraWords)) return;
+        if (!isSensitiveText(text, extraWords, ln.ocr)) return;
         var x0 = Math.min.apply(null, ln.parts.map(function (q) { return q.x; }));
         var x1 = Math.max.apply(null, ln.parts.map(function (q) { return q.x + q.w; }));
         var y0 = Math.min.apply(null, ln.parts.map(function (q) { return q.y; }));
@@ -1423,7 +1489,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
       var keepBoxes = [];
       lines.forEach(function (ln) {
         var text = ln.parts.map(function (q) { return q.str; }).join('');
-        if (isSensitiveText(text, extraWords)) return;
+        if (isSensitiveText(text, extraWords, ln.ocr)) return;
         if (!text.replace(/\s/g, '')) return;
         var y0 = Math.min.apply(null, ln.parts.map(function (q) { return q.y; }));
         keepBoxes.push({ y: y0 });
@@ -1453,6 +1519,23 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
           var top = Math.floor(Math.min.apply(null, lower.map(function (b) { return b.y; })) - 6);
           var wouldLose = keepBoxes.filter(function (k) { return k.y >= top; }).length;
           if (top > H * 0.76 && wouldLose === 0) { cutAt = top; cropped = H - cutAt; }
+        }
+      }
+
+      /* それでも見つからないときは、文字ではなく見た目で帯を探す。
+         色地に白抜きの社名は文字認識が届かず、文字だけを手がかりにすると
+         帯があることに気づけないため。紙の余白を境にして切る。
+         切る範囲に物件情報の文字があるときは、誤って落とさないよう見送る。 */
+      if (cutAt >= H) {
+        var px = findBandByPixels(ctx, W, H);
+        if (px != null) {
+          var loseTexts = lines.filter(function (ln) {
+            var ty = Math.min.apply(null, ln.parts.map(function (q) { return q.y; }));
+            if (ty < px) return false;
+            var tx = ln.parts.map(function (q) { return q.str; }).join('');
+            return tx.replace(/\s/g, '') && !isSensitiveText(tx, extraWords) && !BAND_NOTE.test(tx);
+          }).length;
+          if (loseTexts === 0) { cutAt = px; cropped = H - cutAt; }
         }
       }
 
@@ -2454,7 +2537,7 @@ window.__RE = {
   renderRedactedPdf: renderRedactedPdf, isSensitiveText: isSensitiveText, pickPrice: pickPrice, pickWalk: pickWalk,
   tighten: tighten, looksLikeProperty: looksLikeProperty,
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
-  findBandTop: findBandTop, isSensitiveText: isSensitiveText,
+  findBandTop: findBandTop, isSensitiveText: isSensitiveText, findBandByPixels: findBandByPixels,
   priceLabel: priceLabel, applyMode: applyMode, encodeWithinBudget: encodeWithinBudget, SHEET_BUDGET: SHEET_BUDGET, CONFIG: CONFIG
 };
 </script>

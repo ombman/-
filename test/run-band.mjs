@@ -207,6 +207,57 @@ const sens = await p.evaluate(() => [
 sens.forEach(s => ok((s.want ? '消す：' : '残す：') + s.t.slice(0,28), s.got === s.want,
                      `判定=${s.got}`));
 
+/* 文字認識だけで読んだ行は、読み違いで物件情報を消してしまわないよう
+   判定を厳しくする（消すのは読み違えようのない連絡先だけ）。 */
+console.log('\n-- 文字認識の行は読み違えようのない連絡先だけ消す');
+const ocrCases = await p.evaluate(() => [
+  ['専有面積　71.31㎡', false],
+  ['株式会社コンフィアンス不動産', true],   /* 社名は情報元なので消す */
+  ['大阪市中央区北久宝寺町1-2-1', false],
+  ['物件確認はこちら', false],
+  ['リノベーション内容', false],
+  ['TEL 06-6125-5801', true],
+  ['info@confiance-f.co.jp', true],
+  ['06-6125-5801', true],
+  ['大阪府知事(3)第55822号', true],
+  ['https://confiance-f.co.jp', true],
+].map(([t, want]) => ({ t, want, got: window.__RE.isSensitiveText(t, [], true) })));
+ocrCases.forEach(c => ok((c.want ? '消す：' : '残す：') + c.t.slice(0,26),
+                         c.got === c.want, `判定=${c.got}`));
+
+/* 文字が読めなくても、見た目（紙の余白）から帯を探せること */
+console.log('\n-- 文字が読めない帯を見た目で切る');
+const px = await p.evaluate(() => {
+  /* 下に色地の帯、その上に余白、さらに上に本文 という紙面を作る */
+  const W = 400, H = 1000;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, W, H);
+  /* 本文（0〜880px）に文字らしい黒い線を並べる */
+  cx.fillStyle = '#222';
+  for (let y = 40; y < 880; y += 26) cx.fillRect(20, y, W - 40, 10);
+  /* 余白（880〜905px）は白のまま */
+  /* 帯（905〜985px）は色地。文字は白抜きなので読み取れない想定 */
+  cx.fillStyle = '#0b63b0'; cx.fillRect(10, 905, W - 20, 80);
+  const cut = window.__RE.findBandByPixels(cx, W, H);
+
+  /* 帯が無い紙面では切らないこと */
+  const cv2 = document.createElement('canvas');
+  cv2.width = W; cv2.height = H;
+  const cx2 = cv2.getContext('2d', { willReadFrequently: true });
+  cx2.fillStyle = '#fff'; cx2.fillRect(0, 0, W, H);
+  cx2.fillStyle = '#222';
+  for (let y = 40; y < 980; y += 26) cx2.fillRect(20, y, W - 40, 10);
+  const cut2 = window.__RE.findBandByPixels(cx2, W, H);
+  return { cut, cut2, H };
+});
+console.log(`   帯のある紙面 → 切り取り位置 ${px.cut}px（帯は905pxから・余白は880〜905px）`);
+console.log(`   帯のない紙面 → ${px.cut2 === null ? '切らない' : px.cut2 + 'px'}`);
+ok('帯の上の余白で切っている', px.cut !== null && px.cut > 880 && px.cut <= 905, `${px.cut}px`);
+ok('本文は切っていない', px.cut === null || px.cut > 870, `${px.cut}px`);
+ok('帯が無い紙面は切らない', px.cut2 === null, String(px.cut2));
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
 process.exit(fail?1:0);
