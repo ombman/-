@@ -400,6 +400,33 @@ ok('帯の上の周辺施設の行を残して切る', gp.amenity === 843, Strin
 ok('帯の上の「現況：空」「引渡日：相談」を残して切る', gp.shortVal === 853, String(gp.shortVal));
 ok('帯の横に備考欄がある配置では余白で切らない（備考の費用を残す）', gp.besideMemo === null, String(gp.besideMemo));
 
+/* 実物の販売図面で物件名に入っていた、社名・キャッチコピー・種別名 */
+console.log('\n-- 物件名：社名・キャッチコピーを名前にしない');
+const nm2 = await p.evaluate(() => {
+  const N = t => window.__RE.extract(t, []).record.name;
+  return {
+    brand: N('中古マンション\n三井のリハウス\n価格 5,480万円'),
+    catch1: N('中古マンション\n周辺環境良好！阪急西宮ガーデンズにもアクセス◎'),
+    catch2: N('中古マンション\n～テラスと専用庭のある1階部分の住戸です～'),
+    catch3: N('中古マンション\n♦区分マンション買取強化中♦'),
+    service: N('中古マンション\nハウスクリーニング'),
+    generic: N('中古マンション\nマンション'),
+    table: N('マンション 名称 価格 交通\n日商岩井上甲子園マンション 3,280 万円 JR東海道本線「甲子園口」駅 徒歩8分'),
+    redacted: N('物件名 ［削除済み］プラウド夙川コートテラス'),
+    kataRo: N('物件名 ジオ甲子園ロノーヴ'),
+  };
+});
+Object.entries(nm2).forEach(([k,v])=>console.log(`   ${k} → ${JSON.stringify(v)}`));
+ok('会社のブランド名（三井のリハウス）を名前にしない', nm2.brand === null, JSON.stringify(nm2.brand));
+ok('キャッチコピー（！◎）を名前にしない', nm2.catch1 === null, JSON.stringify(nm2.catch1));
+ok('キャッチコピー（～…です～）を名前にしない', nm2.catch2 === null, JSON.stringify(nm2.catch2));
+ok('キャッチコピー（♦…強化中♦）を名前にしない', nm2.catch3 === null, JSON.stringify(nm2.catch3));
+ok('サービス名（ハウスクリーニング）を名前にしない', nm2.service === null, JSON.stringify(nm2.service));
+ok('種別そのもの（マンション）を名前にしない', nm2.generic === null, JSON.stringify(nm2.generic));
+ok('見出し行の次の行の最初の欄を名前にする', nm2.table === '日商岩井上甲子園マンション', JSON.stringify(nm2.table));
+ok('情報元を消した跡［削除済み］を名前に含めない', nm2.redacted === 'プラウド夙川コートテラス', JSON.stringify(nm2.redacted));
+ok('「甲子園ロ」を「甲子園口」に直す', nm2.kataRo === 'ジオ甲子園口ノーヴ', JSON.stringify(nm2.kataRo));
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
 process.exit(fail?1:0);
