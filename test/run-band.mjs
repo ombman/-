@@ -364,6 +364,42 @@ keep.slice(0,5).forEach(k => ok('塗らない：' + k.t, k.got === false, `判�
 ok('社名が同じ行にあれば塗る：' + keep[5].t, keep[5].got === true, `判定=${keep[5].got}`);
 ok('電話番号が同じ行にあれば塗る：' + keep[6].t, keep[6].got === true, `判定=${keep[6].got}`);
 
+/* 実物の販売図面（9月分25ページ）で見つかったケース。
+   紙面の余白を境目にして帯を切る判定を、余白の位置を与えて確かめる。 */
+console.log('\n-- 余白を境目に帯を切る（実物の図面の配置）');
+const gp = await p.evaluate(() => {
+  const G = (lines, blanks) => {
+    const ink = y => blanks.some(([a, b]) => y >= a && y <= b) ? 0 : 0.2;
+    const r = window.__RE.findBandByGaps(lines, 1000, ink);
+    return r ? r.cutAt : null;
+  };
+  return {
+    /* 三井住友トラスト：帯のすぐ上に周辺施設の行 */
+    amenity: G([
+      { y: 820, h: 12, x: 900, w: 300, text: 'コープ夙川まで520m(徒歩7分)' },
+      { y: 860, h: 14, x: 900, w: 300, text: '三井住友トラスト不動産株式会社' },
+      { y: 890, h: 14, x: 650, w: 200, text: 'TEL 0798-66-4866' },
+    ], [[800, 806], [840, 846]]),
+    /* 福屋不動産販売：帯の上に「現況：空」「引渡日：相談」 */
+    shortVal: G([
+      { y: 820, h: 12, x: 580, w: 100, text: '現況:空' },
+      { y: 820, h: 12, x: 720, w: 100, text: '引渡日:相談' },
+      { y: 870, h: 14, x: 460, w: 200, text: '取引態様【専任媒介】' },
+      { y: 900, h: 14, x: 460, w: 200, text: 'FAX:0798-64-2981' },
+    ], [[790, 796], [850, 856]]),
+    /* 安田建物管理：帯の横に備考欄が並び、余白は備考の途中にしかない */
+    besideMemo: G([
+      { y: 820, h: 12, x: 600, w: 380, text: '○JACCS 保証委託料 賃料等の50%' },
+      { y: 850, h: 12, x: 600, w: 380, text: '○鍵交換費用 22,000円(税込)' },
+      { y: 860, h: 16, x: 20, w: 400, text: '安田建物管理㈱ TEL:0798-34-6963' },
+    ], [[836, 842]]),
+  };
+});
+console.log(`   ${JSON.stringify(gp)}`);
+ok('帯の上の周辺施設の行を残して切る', gp.amenity === 843, String(gp.amenity));
+ok('帯の上の「現況：空」「引渡日：相談」を残して切る', gp.shortVal === 853, String(gp.shortVal));
+ok('帯の横に備考欄がある配置では余白で切らない（備考の費用を残す）', gp.besideMemo === null, String(gp.besideMemo));
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
 process.exit(fail?1:0);

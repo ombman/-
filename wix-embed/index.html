@@ -478,6 +478,62 @@ var LIMIT = 0.78;
    （「※上記専有面積にはMBを含みます」は物件情報なので読み飛ばさない）。 */
 var BAND_NOTE = /優先|ご了承|予告なく/;
 
+/* 業者の印（電話・免許・担当・取引態様など）がある行か。
+   「管理会社：◯◯㈱」のような物件の属性としての社名は帯の印にしない。 */
+function bandIsHint(t) {
+  return (BAND_HINT.test(t) || STRONG_CONTACT.test(t)) && !ATTR_COMPANY_LINE.test(t);
+}
+/* 物件情報の「値」の行か。語だけでなく数字を伴うものに限る。
+   帯の中にも「マンション敷地内駐車場の申し込みは…」のように物件情報の語を
+   含む案内文が並ぶため、語だけで判定すると帯の途中で止まってしまう。
+   周辺施設（「コープ夙川まで520m（徒歩7分）」）や業者の事務所住所も値ではない。 */
+function bandIsValue(t) {
+  return BAND_STOP.test(t) && /[0-9０-９]/.test(t) && !BAND_NOTE.test(t) &&
+         !bandIsHint(t) && !SOURCE_MARK.test(t) && !/事務所|本社|本店|商号|宅建/.test(t) &&
+         !/まで|[0-9]\s*m\s*[（(]|[0-9]\s*m$|約\s*[0-9]+\s*m/.test(t);
+}
+
+/* 帯と本文の間の「何も描かれていない横一行（余白）」を候補にして、
+   その下に業者の印があり、物件の値が無い、いちばん上の余白で切る。
+   文字の位置だけで判定すると、帯のすぐ上の行と高さが重なったり、
+   文字認識が崩れたりして帯の範囲を誤るため、紙面の余白を境目の根拠にする。
+   inkAt(y) は横一行の濃い点の割合。見つからなければ null。 */
+function findBandByGaps(lines, H, inkAt) {
+  if (!inkAt) return null;
+  var from = Math.floor(H * LIMIT), gaps = [], run = 0;
+  for (var y = from; y < H; y++) {
+    if (inkAt(y) < 0.004) { run++; continue; }
+    if (run >= 3) gaps.push(y - Math.ceil(run / 2));
+    run = 0;
+  }
+  var ls = (lines || []).filter(function (l) { return l && String(l.text || '').replace(/\s/g, ''); });
+  var why = window.__RE_DEBUG ? (findBandByGaps.why = []) : null;
+  for (var i = 0; i < gaps.length; i++) {
+    var g = gaps[i];
+    var below = ls.filter(function (l) { return l.y >= g; });
+    if (!below.length) { if (why) why.push(g + ':empty'); continue; }
+    /* 余白で切るときは、周辺施設（「コープ夙川まで520m（徒歩7分）」）も
+       残すべき物件情報として扱う。その行より下の余白で切る。 */
+    /* 「現況：空」「引渡日：相談」のように数字の無い短い項目も物件情報。
+       帯の中の長い案内文（「マンション敷地内駐車場の申し込みは…」）とは長さで区別する。 */
+    var val = below.filter(function (l) {
+      var t = l.text, len = t.replace(/\s/g, '').length;
+      if (bandIsHint(t) || SOURCE_MARK.test(t) || BAND_NOTE.test(t)) return false;
+      if (bandIsValue(t) || (BAND_STOP.test(t) && (/[0-9０-９]/.test(t) || len <= 16))) return true;
+      /* 金額・率を含む行（「鍵交換費用22,000円」「賃料等の1%」）も物件の費用情報。
+         帯の手数料の表（「貸主0% 借主100%」「元付・客付」）は業者側の情報なので除く。 */
+      return /[0-9][0-9,]*\s*円|[0-9]\s*[%％]/.test(zen2han(t)) &&
+             !/貸主|借主|売主|買主|元付|客付|負担|分配|手数料|報酬|広告料/.test(t);
+    });
+    if (val.length) { if (why) why.push(g + ':value ' + val[0].text.slice(0, 30)); continue; }
+    if (!below.some(function (l) { return bandIsHint(l.text); })) { if (why) why.push(g + ':nohint'); continue; }
+
+    if (why) why.push(g + ':cut');
+    return { cutAt: g, isBand: true, cutTexts: below.map(function (l) { return l.text; }) };
+  }
+  return null;
+}
+
 /* 帯の上端を求める。lines は {text, y} の配列、H はページの高さ（画素）。
    下端から上へ1行ずつ見て、物件情報の行に当たったところで止める。
    連絡先そのものではない行（報酬形態・取引態様・自社広告）を理由に
@@ -487,18 +543,7 @@ function findBandTop(lines, H, W, inkAt) {
   var ordered = (lines || [])
     .filter(function (l) { return l && String(l.text || '').replace(/\s/g, ''); })
     .sort(function (a, b) { return a.y - b.y; });
-  function isHint(t) {
-    /* 「管理会社：◯◯㈱」のような物件の属性としての社名は帯の印にしない */
-    return (BAND_HINT.test(t) || STRONG_CONTACT.test(t)) && !ATTR_COMPANY_LINE.test(t);
-  }
-  /* 物件情報の「値」の行。語だけでなく数字を伴うものに限る。
-     帯の中にも「マンション敷地内駐車場の申し込みは…」のように物件情報の語を
-     含む案内文が並ぶため、語だけで判定すると帯の途中で止まってしまう。 */
-  function isValue(t) {
-    /* 業者の事務所の住所（「事務所所在地」「本社」など）は物件の値ではない */
-    return BAND_STOP.test(t) && /[0-9０-９]/.test(t) && !BAND_NOTE.test(t) &&
-           !isHint(t) && !SOURCE_MARK.test(t) && !/事務所|本社|本店|商号|宅建/.test(t);
-  }
+  var isHint = bandIsHint, isValue = bandIsValue;
   function bot(l) { return l.y + (l.h || 0); }
   var low = ordered.filter(function (l) { return l.y >= H * LIMIT; });
   /* 業者の印（電話・免許・担当・取引態様など）を下から順にたどり、
@@ -1479,30 +1524,43 @@ function findBandByPixels(ctx, W, H) {
   if (from >= H - 8 || W < 8) return null;
   var d;
   try { d = ctx.getImageData(0, from, W, H - from).data; } catch (e) { return null; }
-  var rows = H - from, cols = Math.ceil(W / 3), ink = new Array(rows);
+  var rows = H - from, cols = Math.ceil(W / 3), ink = new Array(rows), flat = new Array(rows);
   for (var y = 0; y < rows; y++) {
-    var n = 0, base = y * W * 4;
+    var n = 0, base = y * W * 4, hist = {};
     for (var x = 0; x < W; x += 3) {
       var i = base + x * 4;
       if (d[i] < 235 || d[i + 1] < 235 || d[i + 2] < 235) n++;
+      /* 色を粗く丸めて数え、いちばん多い色の割合を「単色さ」とする */
+      var k = (d[i] >> 5) + ',' + (d[i + 1] >> 5) + ',' + (d[i + 2] >> 5);
+      hist[k] = (hist[k] || 0) + 1;
     }
     ink[y] = n / cols;
+    var top = 0; for (var kk in hist) if (hist[kk] > top) top = hist[kk];
+    flat[y] = top / cols;
   }
-  /* 帯の下端（内容が詰まっている行）を探す */
-  var bottom = null;
+  /* 帯＝横幅いっぱいに色が付き（白以外が6割以上）、単色の地が大半を占める行が
+     一定の高さ続く塊。写真は色がばらつくので単色にならず、ここで除外される。
+     下にある小さな注記などは飛ばし、いちばん下の帯を探す。 */
+  var minLen = Math.max(8, Math.round(H * 0.025)), runEnd = null, len = 0, bandTop = null;
   for (var y2 = rows - 1; y2 >= 0; y2--) {
-    if (ink[y2] > 0.12) { bottom = y2; break; }
+    var isBand = ink[y2] > 0.6 && flat[y2] > 0.45;
+    if (isBand) { if (runEnd == null) runEnd = y2; len++; continue; }
+    if (runEnd != null && len >= minLen) { bandTop = y2 + 1; break; }
+    runEnd = null; len = 0;
   }
-  if (bottom == null) return null;
-  /* そこから上へ、余白が続く場所（＝帯の上の隙間）を探す */
-  var need = Math.max(3, Math.round(H * 0.005)), run = 0, gap = null;
-  for (var y3 = bottom; y3 >= 0; y3--) {
+  if (bandTop == null) return null;
+  /* 帯の中の白抜きの大きな文字（社名・電話番号）の行は単色の判定から外れ、
+     そこで帯が終わったように見えてしまう。色の付いた行が続くかぎり上へたどり、
+     帯の本当の上端まで戻る（紙面の12%まで）。 */
+  var lim = Math.max(0, bandTop - Math.round(H * 0.12));
+  while (bandTop - 1 >= lim && ink[bandTop - 1] > 0.35) bandTop--;
+  /* 帯の上の余白（白い横一行が続くところ）で切る */
+  var need = Math.max(3, Math.round(H * 0.004)), run = 0, gap = null;
+  for (var y3 = bandTop - 1; y3 >= 0; y3--) {
     if (ink[y3] < 0.02) { run++; if (run >= need) { gap = y3 + Math.floor(run / 2); break; } }
-    else run = 0;
+    else break;                                /* 帯の上がすぐ本文なら、帯の上端で切る */
   }
-  if (gap == null) return null;
-  var cut = from + gap, cropped = H - cut;
-  /* 帯として不自然な大きさなら見送る */
+  var cut = from + (gap != null ? gap : bandTop), cropped = H - cut;
   if (cropped < H * 0.03 || cropped > H * 0.24) return null;
   return cut;
 }
@@ -1532,6 +1590,27 @@ function sampleBackground(ctx, x, y, w, h) {
 
 /* 指定範囲を背景色で塗り、文字のふちが薄く残っていないか確かめる。
    残っていれば少しずつ広げて塗り直す（黒帯にはしない）。 */
+/* 業者欄のブロックを、その中でいちばん多い色（＝紙の地の色）で塗る。
+   周りの色を拾う paintOut だと、ブロックを囲む太い枠線の色（黒など）で
+   塗ってしまい、黒い四角が残るため。 */
+function fillBox(ctx, x, y, w, h) {
+  x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y));
+  w = Math.max(1, Math.floor(w)); h = Math.max(1, Math.floor(h));
+  var d, hist = {}, best = null, bestN = 0;
+  try { d = ctx.getImageData(x, y, w, h).data; } catch (e) { d = null; }
+  if (d) {
+    for (var i = 0; i < d.length; i += 4 * 7) {
+      var k = (d[i] >> 4) + ',' + (d[i + 1] >> 4) + ',' + (d[i + 2] >> 4);
+      var e = hist[k] || (hist[k] = { n: 0, r: 0, g: 0, b: 0 });
+      e.n++; e.r += d[i]; e.g += d[i + 1]; e.b += d[i + 2];
+      if (e.n > bestN) { bestN = e.n; best = e; }
+    }
+  }
+  ctx.fillStyle = best ? 'rgb(' + Math.round(best.r / best.n) + ',' + Math.round(best.g / best.n) + ',' +
+                          Math.round(best.b / best.n) + ')' : '#fff';
+  ctx.fillRect(x, y, w, h);
+}
+
 function paintOut(ctx, x, y, w, h, W, H) {
   var col = sampleBackground(ctx, x, y, w, h);
   var base = (col.match(/[0-9]+/g) || [255, 255, 255]).map(Number);
@@ -1750,19 +1829,24 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
          それらを理由に切り取りを見送ると帯が丸ごと残ってしまうため、
          下端から上へ1行ずつ見て、物件情報の行に当たったところで止める。 */
       /* 横一行の「白ではない画素の割合」。切る位置を余白に合わせるのに使う */
-      var inkAt = function (y, fx0, fx1) {
+      var inkAt = function (y, fx0, fx1, raw) {
         var d, a = Math.max(0, Math.floor(fx0 || 0)), b = Math.min(W, Math.ceil(fx1 == null ? W : fx1));
         if (b - a < 2) return 0;
         try { d = ctx.getImageData(a, Math.round(y), b - a, 1).data; } catch (e) { return 1; }
-        var n = 0, c = 0;
-        for (var x = 0; x < b - a; x += 3, c++) {
+        /* 濃い点だけを数える（スキャン資料の地のくすみ＝薄い灰色は無視）。
+           表の縦の罫線だけが通っている行は余白とみなす。罫線は数本の細い線だが、
+           文字の行は細かい線がたくさん並ぶので区別できる。 */
+        var n = 0, segs = 0, maxSeg = 0, cur = 0;
+        for (var x = 0; x < b - a; x++) {
           var i = x * 4;
-          /* 濃い点だけを数える。スキャン資料の地のくすみ（薄い灰色）は無視する */
-          if (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2] < 200) n++;
+          if (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2] < 200) { n++; cur++; }
+          else if (cur) { segs++; if (cur > maxSeg) maxSeg = cur; cur = 0; }
         }
-        return c ? n / c : 1;
+        if (cur) { segs++; if (cur > maxSeg) maxSeg = cur; }
+        if (!raw && segs <= 10 && maxSeg <= 8) return 0;
+        return n / (b - a);
       };
-      var band = findBandTop(lines.map(function (ln) {
+      var bandLines = lines.map(function (ln) {
         var ty = Math.min.apply(null, ln.parts.map(function (q) { return q.y; }));
         var by = Math.max.apply(null, ln.parts.map(function (q) { return q.y + q.h; }));
         var tx0 = Math.min.apply(null, ln.parts.map(function (q) { return q.x; }));
@@ -1771,7 +1855,11 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
           text: ln.parts.map(function (q) { return q.str; }).join(''),
           y: ty, h: by - ty, x: tx0, w: tx1 - tx0
         };
-      }), H, W, inkAt);
+      });
+      /* まず紙面の余白を境目にした判定を試し、だめなら文字の並びから判定する */
+      var gapBand = findBandByGaps(bandLines, H, inkAt);
+      var textBand = findBandTop(bandLines, H, W, inkAt);
+      var band = gapBand || textBand;
       var cutAt = band.cutAt;
       if (cutAt < H) cropped = H - cutAt;
       /* 業者欄が物件情報の表と横に並ぶ配置では、切らずに業者欄のブロックだけを塗る */
@@ -1785,7 +1873,8 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         var need = Math.max(6, Math.round(H * 0.012));
         var dense = 0, denseNeed = Math.max(6, Math.round(H * 0.008));
         for (var yy = Math.floor(gy) - 1; yy >= stopAt; yy--) {
-          var ink = inkAt(yy, gx0, gx1);
+          /* 広げるときは罫線も「描かれているもの」として数える（表の枠の中を上へたどるため） */
+          var ink = inkAt(yy, gx0, gx1, true);
           if (ink < 0.004) { dense = 0; if (++run >= need) break; continue; }
           run = 0;
           /* 詰まった行が続くのは写真。細い罫線（1〜3画素）は越えて、写真の手前で止める */
@@ -1796,8 +1885,8 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
       }
       if (band.box) {
         var bp = Math.max(4, H * 0.006);
-        paintOut(ctx, Math.max(0, band.box.x - bp), Math.max(0, band.box.y - bp),
-                 Math.min(W, band.box.w + bp * 2), Math.min(H, band.box.h + bp * 2), W, H);
+        fillBox(ctx, Math.max(0, band.box.x - bp), Math.max(0, band.box.y - bp),
+                Math.min(W, band.box.w + bp * 2), Math.min(H, band.box.h + bp * 2));
         masked += band.cutTexts.length;
       }
 
@@ -1857,6 +1946,13 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         bytes: Math.round(enc.dataUrl.length * 0.75),
         masked: masked, croppedPx: cropped,
         overPaint: overPaint,   /* 塗りつぶしを見送った＝目視確認が必要 */
+        /* 検証用：window.__RE_DEBUG が真のときだけ、判定に使った行と帯の結果を返す */
+        debug: window.__RE_DEBUG ? { H: H, W: W, band: band, why: findBandByGaps.why, lines: lines.map(function (ln) {
+          return { t: ln.parts.map(function (q) { return q.str; }).join(''), ocr: !!ln.ocr,
+                   y: Math.round(Math.min.apply(null, ln.parts.map(function (q) { return q.y; }))),
+                   x: Math.round(Math.min.apply(null, ln.parts.map(function (q) { return q.x; }))),
+                   s: isSensitiveText(ln.parts.map(function (q) { return q.str; }).join(''), extraWords, ln.ocr) };
+        }) } : undefined,
         ocrText: ocrText
       };
       }
@@ -2833,7 +2929,7 @@ window.__RE = {
   tighten: tighten, looksLikeProperty: looksLikeProperty,
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
   findBandTop: findBandTop, findBandByPixels: findBandByPixels, filledCount: filledCount,
-  mergeName: mergeName, pickName: pickName, normalizeOcr: normalizeOcr,
+  mergeName: mergeName, pickName: pickName, normalizeOcr: normalizeOcr, findBandByGaps: findBandByGaps,
   priceLabel: priceLabel, applyMode: applyMode, encodeWithinBudget: encodeWithinBudget, SHEET_BUDGET: SHEET_BUDGET, CONFIG: CONFIG
 };
 </script>
