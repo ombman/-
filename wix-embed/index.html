@@ -689,6 +689,8 @@ var PRICE_NG = /管理費|修繕|積立|駐車場|駐輪|バイク|賃料|地代
 /* 3-2. 価格（万円単位の数値で保持） */
 function pickPrice(t) {
   var s = zen2han(tighten(t));
+  /* 「5,280 (税込) 万円」のように数字と「万円」の間に入る税の注記を取り除く */
+  s = s.replace(/[(（]\s*(?:消費)?税\s*(?:込|別|抜)[みき]?\s*(?:価格)?\s*[)）]/g, ' ');
 
   var oku = s.match(/([0-9]+)\s*億\s*([0-9,]*)\s*万?円/);
   if (oku) {
@@ -750,6 +752,8 @@ function cleanStation(raw) {
   nm = nm.replace(/^[^぀-ヿ一-鿿A-Za-z0-9]+/, '')
          .replace(/[`'^~*|_=+<>\[\]{}\\■●◆◇□▶・…]/g, '');
   nm = nm.replace(/^(?:交通|最寄|最寄り|アクセス|駅)+/, '').replace(/^(?:JR|ＪＲ)/, '').trim();
+  /* 「各最寄」「最寄」「各」のような駅名でない語 */
+  if (/^(?:各|各最寄り?|最寄り?|近隣|周辺)$/.test(nm)) return null;
   if (!nm || nm.length > 12 || !/[぀-ヿ一-鿿]/.test(nm)) return null;
   return nm + '駅';
 }
@@ -908,7 +912,8 @@ function pickAge(t) {
    \u5f8c\u534a\uff08\u5358\u4f4d\u2192\u6570\u5024\uff09\u306f[ \t\n]*\uff1aREINS\u8868\u3067\u5358\u4f4d\u3068\u6570\u5024\u304c\u5225\u884c\u306b\u306a\u308b\u5834\u5408\u306b\u5bfe\u5fdc\u3002 */
 var SQM_RE = /(?:([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?)[ \t]*(?:\u33a1|m2|m\u00b2|mr|rrf|nf|\u5e73\u7c73|\u5e73\u65b9\u30e1\u30fc\u30c8\u30eb)|(?:\u33a1|m2|m\u00b2|mr|rrf|nf|\u5e73\u7c73|\u5e73\u65b9\u30e1\u30fc\u30c8\u30eb)[ \t\n]*([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?))/g;
 /* 専有面積として採用しない文脈 */
-var AREA_NG = /敷地|土地|バルコニー|テラス|専用庭|トランク|総面積|坪|delivered/;
+/* 「バルコニー」の長音は文字の正規化で「-」に変わるため「バルコニ」で判定する */
+var AREA_NG = /敷地|土地|バルコニ|ベランダ|テラス|専用庭|ルーフ|トランク|総面積|坪|delivered/;
 
 function areaCandidates(t) {
   var s = zen2han(tighten(t));
@@ -917,8 +922,11 @@ function areaCandidates(t) {
   while ((m = SQM_RE.exec(s))) {
     var v = num(m[1] != null ? m[1] : m[2]);
     if (v == null || v < 10 || v > 400) continue;
+    /* 除外の判定は値の手前だけで行う。「93.11㎡（28.16坪）」のように
+       値の後ろに坪換算が続く書き方で、正しい専有面積を捨てないため。 */
+    var before = s.slice(Math.max(0, m.index - 14), m.index + m[0].length);
     var ctx = s.slice(Math.max(0, m.index - 14), m.index + m[0].length + 6);
-    out.push({ value: v, ng: AREA_NG.test(ctx), labeled: /(?:専有|占有)面積?/.test(ctx) });
+    out.push({ value: v, ng: AREA_NG.test(before), labeled: /(?:専有|占有)面積?/.test(ctx) });
   }
   return out;
 }
@@ -1234,6 +1242,18 @@ function looksLikeProperty(res) {
 /* 3-9. 1つの資料から複数物件を取り出す。
    物件リスト（複数物件が1つのPDFにまとまった資料）では、
    1ページ＝1物件として扱う。 */
+/* rec の空欄だけを alt の値で埋める（名前・種別は変えない） */
+function fillMissing(rec, alt) {
+  if (!rec || !alt) return rec;
+  ['priceMan', 'ownArea', 'floorArea', 'share'].forEach(function (k) {
+    if (rec[k] == null && alt[k] != null) rec[k] = alt[k];
+  });
+  if (rec.ageYears == null && alt.ageYears != null) { rec.ageYears = alt.ageYears; rec.builtLabel = alt.builtLabel; }
+  if (rec.walkMin == null && alt.walkMin != null) { rec.walkMin = alt.walkMin; rec.station = alt.station; }
+  else if (rec.walkMin != null && !rec.station && alt.station && alt.walkMin === rec.walkMin) rec.station = alt.station;
+  return rec;
+}
+
 function extractAll(sections, extraWords, opts) {
   var out = [];
   /* keepEmpty: PDFのページは文字が1つも無くても（スキャン画像のページ）一覧に出す */
@@ -1243,6 +1263,9 @@ function extractAll(sections, extraWords, opts) {
     var body = String(text || '');
     var n = body.replace(/\s/g, '').length;
     var res = extract(body, extraWords);
+    /* 表組みの図面では記録順だと項目名と値が離れることがある。
+       紙面順に並べ直した文字からも読み、取れなかった数値の項目だけを補う。 */
+    if (sections.alt && sections.alt[i]) fillMissing(res.record, extract(sections.alt[i], extraWords).record);
     res.pageNo = i + 1;
     res.filled = filledCount(res.record);
 
@@ -1291,6 +1314,41 @@ function readTextFile(file) {
     fr.readAsText(file, 'utf-8');
   });
 }
+/* PDFの文字を、紙面に見えている順（上から下、同じ高さは左から右）に並べる。
+   PDF内部の記録順のままだと、表組みの図面では「項目名の列をすべて → 値の列をすべて」
+   の順に出てくることがあり、「専有面積」と「93.11㎡」、「共有持分」と
+   「885800/26769000」が遠く離れて読み取れなくなる。 */
+function layoutText(items) {
+  var its = [];
+  (items || []).forEach(function (it) {
+    if (!it || !it.str || !it.transform) return;
+    var h = Math.abs(it.height || it.transform[3] || 0) || 8;
+    its.push({ s: it.str, x: it.transform[4], y: it.transform[5], h: h,
+               w: it.width || it.str.length * h * 0.6 });
+  });
+  if (!its.length) return '';
+  its.sort(function (a, b) { return b.y - a.y || a.x - b.x; });
+  var rows = [];
+  its.forEach(function (it) {
+    var r = rows[rows.length - 1];
+    /* 高さの差が文字の高さの半分以内なら同じ行 */
+    if (r && Math.abs(r.y - it.y) <= Math.max(2, Math.min(r.h, it.h) * 0.5)) {
+      r.items.push(it); return;
+    }
+    rows.push({ y: it.y, h: it.h, items: [it] });
+  });
+  return rows.map(function (r) {
+    r.items.sort(function (a, b) { return a.x - b.x; });
+    var line = '', prev = null;
+    r.items.forEach(function (it) {
+      /* 離れて置かれた文字の間には空白を入れて、別の欄の値がくっつかないようにする */
+      if (prev && it.x - (prev.x + prev.w) > Math.min(prev.h, it.h) * 0.8) line += ' ';
+      line += it.s; prev = it;
+    });
+    return line;
+  }).join('\n');
+}
+
 function readPdfFile(file) {
   if (!window.pdfjsLib) return Promise.reject(new Error('PDF読取ライブラリを読み込めませんでした'));
   return file.arrayBuffer()
@@ -1316,10 +1374,16 @@ function readPdfFile(file) {
               if (it.hasEOL) { out.push(line); line = ''; lastY = null; }
             });
             if (line) out.push(line);
-            return out.join('\n');
+            return { stream: out.join('\n'), layout: layoutText(c.items) };
           }));
       }
-      return Promise.all(jobs);   /* ページごとの配列として返す */
+      /* ページごとの配列として返す。記録順の文字を基本とし、
+         紙面順に並べ直した文字は .alt に添える（取れなかった数値の補完に使う） */
+      return Promise.all(jobs).then(function (pages) {
+        var out = pages.map(function (p) { return p.stream; });
+        out.alt = pages.map(function (p) { return p.layout; });
+        return out;
+      });
     });
 }
 function readAny(file) {
@@ -1349,6 +1413,8 @@ var STRONG_CONTACT = new RegExp([
   '第[0-9]{3,}号'
 ].join('|'));
 
+var PROPERTY_VALUE = /[0-9,.]+\s*万\s*円|[0-9]+(?:\.[0-9]+)?\s*(?:㎡|m2|m²|平米)|徒歩\s*約?\s*[0-9]+\s*分|[0-9]{2,}\s*\/\s*[0-9]{3,}|(?:^|[^0-9A-Za-z])[0-9]\s*[SLDK]{1,4}(?![A-Za-z])/;
+
 /* 伏せる対象かどうかを1つの文字列に対して判定する。
    ocrOnly: 文字認識だけで読み取った行かどうか。 */
 function isSensitiveText(str, extraWords, ocrOnly) {
@@ -1369,6 +1435,10 @@ function isSensitiveText(str, extraWords, ocrOnly) {
      （「国土交通大臣（4）第7356号」の「交通」、
      　「野村不動産（株）…2018年10月建築」の「建築」で守ってしまわないため）。 */
   if (BAND_STOP.test(t) && !CONTACT_MARK.test(t) && !SOURCE_MARK.test(t)) return false;
+  /* 物件の値そのもの（価格・面積・徒歩・持分・間取り）を含む行は、
+     電話番号などが同じ行に無いかぎり塗らない。ラベルの無い値だけの行
+     （「93.11㎡」「5,280万円」「885800/26769000」）も守るため。 */
+  if (PROPERTY_VALUE.test(zen2han(t)) && !STRONG_CONTACT.test(t) && !SOURCE_MARK.test(t)) return false;
   /* ここから先は文字認識だけで読んだ行の扱い。
      読み違いが多く、物件情報の行を情報元と取り違えて紙面から情報を
      消してしまうことがあるため、形が崩れにくいものだけを対象にする。
@@ -1655,7 +1725,12 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         var pd = Math.max(3, b.h * 0.3);
         return sum + (b.w + pd * 2) * (b.h + pd * 2);
       }, 0);
-      var overPaint = paintArea > W * H * 0.25;
+      /* 行数でも見る。1行ずつは小さくても、紙面の多くの行を塗るのは判定の破綻 */
+      var textLines = lines.filter(function (ln) {
+        return ln.parts.map(function (q) { return q.str; }).join('').replace(/\s/g, '');
+      }).length;
+      var overPaint = paintArea > W * H * 0.25 ||
+                      boxes.length > Math.max(10, textLines * 0.4);
       if (overPaint) { boxes = []; masked = 0; }
 
       /* 消す対象でない文字の位置。物件情報を巻き添えにしないための判定に使う */

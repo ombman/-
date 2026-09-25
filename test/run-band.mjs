@@ -330,6 +330,40 @@ ok('横一直線には切らない（右の物件表を残す）', col.cutAt ===
 ok('左の業者欄だけを塗る', col.box && col.box.x + col.box.w <= 540 && col.box.y <= 860 && col.box.y + col.box.h >= 960,
    JSON.stringify(col.box));
 
+/* 夙川安井町パークハイムの図面で読み取れなかった書き方 */
+console.log('\n-- 価格・専有面積・共有持分の書き方の違い');
+const vals = await p.evaluate(() => {
+  const E = t => window.__RE.extract(t, []).record;
+  /* 表が「項目名の列 → 値の列」の順に記録されたPDFを、紙面順の文字で補う */
+  const secs = ['中古マンション\n所在地\n構造\n専有面積\n共有持分\n兵庫県西宮市安井町\n鉄筋コンクリート造\n壁芯\n93.11 ㎡ ( 28.16 坪 )\n885800/26769000'];
+  secs.alt = ['中古マンション\n所在地 兵庫県西宮市安井町\n構造 鉄筋コンクリート造\n専有面積 壁芯 93.11 ㎡ ( 28.16 坪 )\n共有持分 885800/26769000'];
+  const all = window.__RE.extractAll(secs, [], { keepEmpty: true })[0].record;
+  return {
+    taxIn: E('中古マンション\n価格\n5,280 (税込)\n万円').priceMan,
+    taxIn2: E('中古マンション\n価格 5,280（税込）万円').priceMan,
+    parking: E('中古マンション\n駐車場 月額：17,000 円（税別） 保証金 2.5 万円').priceMan,
+    tsubo: E('中古マンション\n専有面積 壁芯 93.11 ㎡ ( 28.16 坪 )').ownArea,
+    column: [all.ownArea, all.share],
+    balcony: E('中古マンション\nバルコニー 12.5㎡\n専用庭 30.2㎡').ownArea,
+  };
+});
+Object.entries(vals).forEach(([k,v])=>console.log(`   ${k} → ${JSON.stringify(v)}`));
+ok('「5,280 (税込) 万円」を読める', vals.taxIn === 5280, String(vals.taxIn));
+ok('「5,280（税込）万円」を読める', vals.taxIn2 === 5280, String(vals.taxIn2));
+ok('駐車場の保証金を価格にしない', vals.parking === null, String(vals.parking));
+ok('「93.11㎡（28.16坪）」を専有面積として読める', vals.tsubo === 93.11, String(vals.tsubo));
+ok('項目名と値が離れた表でも専有面積・共有持分を読める',
+   vals.column[0] === 93.11 && vals.column[1] === '885800/26769000', JSON.stringify(vals.column));
+ok('バルコニー・専用庭の面積を専有面積にしない', vals.balcony === null, String(vals.balcony));
+
+console.log('\n-- 物件の値を含む行は塗らない');
+const keep = await p.evaluate(() => ['93.11 ㎡', '5,280 万円', '885800/26769000', '徒歩1分', '3LDK',
+  '株式会社コンフィアンス不動産 3LDK', 'TEL 06-6125-5801 5,280万円']
+  .map(t => ({ t, got: window.__RE.isSensitiveText(t, []) })));
+keep.slice(0,5).forEach(k => ok('塗らない：' + k.t, k.got === false, `判定=${k.got}`));
+ok('社名が同じ行にあれば塗る：' + keep[5].t, keep[5].got === true, `判定=${keep[5].got}`);
+ok('電話番号が同じ行にあれば塗る：' + keep[6].t, keep[6].got === true, `判定=${keep[6].got}`);
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
 process.exit(fail?1:0);
