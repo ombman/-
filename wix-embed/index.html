@@ -482,40 +482,131 @@ var BAND_NOTE = /優先|ご了承|予告なく/;
    下端から上へ1行ずつ見て、物件情報の行に当たったところで止める。
    連絡先そのものではない行（報酬形態・取引態様・自社広告）を理由に
    切り取りを見送ると帯が丸ごと残るため、それらは帯の一部として扱う。 */
-function findBandTop(lines, H) {
+function findBandTop(lines, H, W, inkAt) {
+  var NONE = { cutAt: H, isBand: false, cutTexts: [] };
   var ordered = (lines || [])
     .filter(function (l) { return l && String(l.text || '').replace(/\s/g, ''); })
     .sort(function (a, b) { return a.y - b.y; });
-  var top = null, hasHint = false, cutTexts = [], above = null;
-  for (var i = ordered.length - 1; i >= 0; i--) {
-    var ln = ordered[i];
-    if (ln.y < H * LIMIT) { above = ln; break; }   /* 切りすぎ防止 */
-    /* 「※図面と現況が異なる場合は現況を優先します」のような但し書きは、
-       帯のすぐ下や中に必ず入る。物件情報の語（現況・面積など）を含むが
-       項目の値ではないため、ここで止めると帯に届かず丸ごと残ってしまう。
-       止めずに読み飛ばし、帯の一部として切り取る。 */
-    if (!BAND_NOTE.test(ln.text) && BAND_STOP.test(ln.text)) { above = ln; break; }
+  function isHint(t) {
     /* 「管理会社：◯◯㈱」のような物件の属性としての社名は帯の印にしない */
-    if (BAND_HINT.test(ln.text) && !ATTR_COMPANY_LINE.test(ln.text)) hasHint = true;
-    top = ln.y; cutTexts.unshift(ln.text);
+    return (BAND_HINT.test(t) || STRONG_CONTACT.test(t)) && !ATTR_COMPANY_LINE.test(t);
   }
-  /* 業者を示す語が1つも無ければ帯ではない（但し書きだけの下部など）ので切らない */
-  if (!hasHint || top == null || top <= H * LIMIT) {
-    return { cutAt: H, isBand: false, cutTexts: [] };
+  /* 物件情報の「値」の行。語だけでなく数字を伴うものに限る。
+     帯の中にも「マンション敷地内駐車場の申し込みは…」のように物件情報の語を
+     含む案内文が並ぶため、語だけで判定すると帯の途中で止まってしまう。 */
+  function isValue(t) {
+    /* 業者の事務所の住所（「事務所所在地」「本社」など）は物件の値ではない */
+    return BAND_STOP.test(t) && /[0-9０-９]/.test(t) && !BAND_NOTE.test(t) &&
+           !isHint(t) && !SOURCE_MARK.test(t) && !/事務所|本社|本店|商号|宅建/.test(t);
   }
-  /* 帯の枠線や社名ロゴは画像なので文字として位置が取れない。
-     文字の上端ちょうどで切るとロゴの上部や枠の罫線が残って雑に見えるため、
-     帯のすぐ上にある行の下端との中間で切る。上に行が無ければ少し広めに切る。 */
-  var cut = top - 6;
-  if (above) {
-    var bottom = above.y + (above.h || 0);
-    if (bottom < top) cut = (bottom + top) / 2;
-  } else {
-    cut = top - Math.max(8, (lines[0] && lines[0].h) || 10);
+  function bot(l) { return l.y + (l.h || 0); }
+  var low = ordered.filter(function (l) { return l.y >= H * LIMIT; });
+  /* 業者の印（電話・免許・担当・取引態様など）を下から順にたどり、
+     間隔が詰まって続く塊だけを帯とみなす。
+     備考欄にぽつんとある「担当者 携帯090-…」のような行は、帯から離れているので含めない。 */
+  var hints = low.filter(function (l) { return isHint(l.text); });
+  if (!hints.length) return NONE;
+  function overlapX(a, b) {
+    if (a.x == null || b.x == null) return false;
+    return a.x < b.x + (b.w || 0) && a.x + (a.w || 0) > b.x;
+  }
+  /* 業者欄に並ぶ行（住所・担当・所属団体・営業時間など）。
+     同じ列でこれらだけが続いていれば、離れた印の行も同じ業者欄とみなす。 */
+  function bandish(t) {
+    return isHint(t) || COMPANY_LIKE.test(t.trim()) || SOURCE_MARK.test(t) ||
+      /〒|事務所|所在地|住所|担当|営業時間|定休日|所属|協会|団体|支部|ファクシミリ|電話|報酬|手数料|商号/.test(t);
+  }
+  var cluster = [hints[hints.length - 1]];
+  for (var i = hints.length - 2; i >= 0; i--) {
+    var h = hints[i];
+    var ctop = Math.min.apply(null, cluster.map(function (c) { return c.y; }));
+    if (ctop - bot(h) <= H * 0.06) { cluster.push(h); continue; }
+    var col = cluster.filter(function (c) { return overlapX(c, h); });
+    if (col.length && ctop - bot(h) <= H * 0.15) {
+      var colTop = Math.min.apply(null, col.map(function (c) { return c.y; }));
+      var between = low.filter(function (l) {
+        return l !== h && overlapX(l, h) && l.y >= bot(h) - 1 && l.y < colTop;
+      });
+      if (between.every(function (l) { return bandish(l.text); })) { cluster.push(h); continue; }
+    }
+    break;
+  }
+  var head = cluster.reduce(function (a, b) { return b.y < a.y ? b : a; });
+  /* 帯の行＝印の最上行と同じ高さに並ぶ行と、それより下の行 */
+  var band = low.filter(function (l) { return l.y >= head.y || bot(l) > head.y + 1; });
+  var values = band.filter(function (l) { return isValue(l.text); });
+
+  if (values.length) {
+    /* 帯の横に物件情報の表が並ぶ配置（左下に業者欄、右に物件概要など）。
+       横一直線に切ると物件情報まで落ちるため、業者欄のブロックだけを塗る。 */
+    if (band.some(function (l) { return l.x == null; })) return NONE;
+    function sameCol(a, b) { return a.x < b.x + (b.w || 0) && a.x + (a.w || 0) > b.x; }
+    /* 物件情報の表と同じ列にある印（備考欄の「TEL0798-…」など）は業者欄に含めない。
+       それらは個別に塗るので、ここでは表と重ならない列だけを業者欄とみなす。 */
+    var src = band.filter(function (l) {
+      if (isValue(l.text)) return false;
+      if (!(isHint(l.text) || COMPANY_LIKE.test(l.text.trim()) || SOURCE_MARK.test(l.text))) return false;
+      return !values.some(function (v) { return sameCol(l, v); });
+    });
+    if (!src.some(function (l) { return isHint(l.text); })) return NONE;
+    var x0 = Math.min.apply(null, src.map(function (l) { return l.x; }));
+    var x1 = Math.max.apply(null, src.map(function (l) { return l.x + (l.w || 0); }));
+    function overlapsX(l) { return l.x < x1 && l.x + (l.w || 0) > x0; }
+    if (values.some(overlapsX)) return NONE;          /* 業者欄と物件情報が重なる＝安全に消せない */
+    var inBox = band.filter(function (l) { return overlapsX(l) && !isValue(l.text); });
+    var y0 = Math.min.apply(null, inBox.map(function (l) { return l.y; }));
+    var y1 = Math.max.apply(null, inBox.map(bot));
+    x0 = Math.min.apply(null, inBox.map(function (l) { return l.x; }));
+    x1 = Math.max.apply(null, inBox.map(function (l) { return l.x + (l.w || 0); }));
+    return { cutAt: H, isBand: true, cutTexts: inBox.map(function (l) { return l.text; }),
+             box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, grow: true };
+  }
+
+  /* 帯の最上段にある社名・ロゴの行（「ウィル不動産販売」「CONFIANCE」など、
+     電話番号などの印が無い行）も、すぐ上に続いていれば帯に含める。 */
+  var top = Math.min.apply(null, band.map(function (l) { return l.y; }));
+  var rest = ordered.filter(function (l) { return band.indexOf(l) < 0 && bot(l) <= top + 1; });
+  while (rest.length) {
+    var up = rest[rest.length - 1];
+    if (up.y < H * LIMIT || !COMPANY_LIKE.test(up.text.trim()) || top - bot(up) > H * 0.04) break;
+    band.unshift(up); top = up.y; rest.pop();
+  }
+  var above = rest.length ? rest[rest.length - 1] : null;
+  var cutTexts = band.map(function (l) { return l.text; });
+
+  /* 切る位置。帯の枠線や社名ロゴは画像なので文字として位置が取れず、
+     文字の上端で切るとロゴの上部が残る。帯のすぐ上の行との間で、
+     何も描かれていない横一行（余白）を選んで切る。 */
+  var lo = above ? bot(above) : Math.max(H * LIMIT, top - H * 0.05);
+  var mid = (lo + top) / 2, cut = above && lo < top ? mid : top - 6;
+  var found = false;
+  if (inkAt && top - lo > 3) {
+    var best = null, bestBelow = null;
+    for (var y = Math.ceil(lo) + 1; y <= Math.floor(top) - 1; y++) {
+      if (inkAt(y) >= 0.004) continue;               /* 濃い点がほぼ無い行だけを余白とみなす */
+      if (y <= mid) best = y;                         /* 中間より上で最も下の余白 */
+      else if (bestBelow == null) bestBelow = y;      /* 無ければ中間より下で最も上 */
+    }
+    if (best != null) { cut = best; found = true; }
+    else if (bestBelow != null) { cut = bestBelow; found = true; }
+  }
+  /* 横一直線に切れる余白が無い＝帯の横に間取り図などが食い込んでいる。
+     このまま切ると間取り図まで途中で切れるので、業者欄の列だけを塗る。 */
+  var withX = band.filter(function (l) { return l.x != null; });
+  if (inkAt && !found && withX.length) {
+    var bx0 = Math.min.apply(null, withX.map(function (l) { return l.x; }));
+    var bx1 = Math.max.apply(null, withX.map(function (l) { return l.x + (l.w || 0); }));
+    if (bx0 > W * 0.12 || bx1 < W * 0.88) {
+      return { cutAt: H, isBand: true, cutTexts: cutTexts,
+               box: { x: bx0, y: top, w: bx1 - bx0, h: H - top }, grow: true };
+    }
   }
   if (cut < H * LIMIT) cut = Math.max(H * LIMIT, top - 6);
   return { cutAt: Math.max(0, Math.floor(cut)), isBand: true, cutTexts: cutTexts };
 }
+
+/* 帯の最上段に置かれる社名・ロゴの行（電話番号などの印が無い行） */
+var COMPANY_LIKE = /株式会社|有限会社|㈱|㈲|（株）|\(株\)|(?:不動産|販売|ハウジング|ホーム|住宅|リアルティ|エステート|地所|商事|ハウス)\s*®?$|^[A-Z][A-Z0-9&.\s]{3,}$/;
 
 /* 物件情報を示す語。この行に当たったら切り取りをそこで止める（残す） */
 var BAND_STOP = new RegExp([
@@ -651,32 +742,83 @@ function priceLabel(man) {
 /* 「西武池袋線「桜台」駅」→「桜台駅」のように駅名だけを取り出す */
 function cleanStation(raw) {
   var nm = String(raw || '');
-  var q = nm.match(/[「『\u201c"]([^」』\u201d"]{1,16})[」』\u201d"]?\s*$/);
+  var q = nm.match(/[「『“"]([^」』”"]{1,16})[」』”"]?\s*$/);
   if (q) nm = q[1];
-  nm = nm.replace(/[「」『』\u201c\u201d"]/g, '');
-  nm = nm.split(/線|[:：]|\s|\/|、|・|\)|）/).pop();
-  nm = nm.replace(/^(?:交通|最寄|最寄り|アクセス|駅)+/, '').trim();
-  if (!nm || nm.length > 12) return null;
+  nm = nm.replace(/[「」『』“”"]/g, '');
+  nm = nm.split(/線|[:：]|\s|\/|／|、|・|\)|）/).pop();
+  /* 行頭の記号や読み違いの記号（「`西宮」「■阪神西宮」）を取り除く */
+  nm = nm.replace(/^[^぀-ヿ一-鿿A-Za-z0-9]+/, '')
+         .replace(/[`'^~*|_=+<>\[\]{}\\■●◆◇□▶・…]/g, '');
+  nm = nm.replace(/^(?:交通|最寄|最寄り|アクセス|駅)+/, '').replace(/^(?:JR|ＪＲ)/, '').trim();
+  if (!nm || nm.length > 12 || !/[぀-ヿ一-鿿]/.test(nm)) return null;
   return nm + '駅';
 }
+
+/* 駅までの徒歩ではないもの（周辺施設・予定地・バス停など）の文脈 */
+var WALK_NG = /まで|予定|仮称|バス停|小学校|中学校|高校|幼稚園|保育|スーパー|コンビニ|病院|医院|公園|郵便|銀行|役所|店|センター|施設|ガーデンズ|モール/;
 
 function pickWalk(t) {
   var s = zen2han(tighten(t));
   var best = null, station = null, m;
 
-  /* 「〇〇駅 徒歩n分」を最優先。備考の「〇〇まで徒歩n分」を拾わないため */
-  var re = /([^\s、。,\n()（）『』「」【】]{1,20}?)\s*[』」）)\]】]*\s*駅\s*[』」）)\]】]*\s*(?:まで|より|から)?\s*[…‥・.、\s]*(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g;
-  while ((m = re.exec(s))) {
-    var v = num(m[2]);
-    if (v != null && v > 0 && v <= 120 && (best == null || v < best)) {
-      best = v; station = cleanStation(m[1]);
+  function scan(text) {
+    var b = null, st = null, mm;
+    /* 「〇〇駅 徒歩n分」。駅名の直後に徒歩が続く形だけを拾う */
+    var re = /([^\s、。,\n()（）『』「」【】]{1,20}?)\s*[』」）)\]】]*\s*駅\s*[』」）)\]】]*\s*(?:まで|より|から)?\s*[…‥・.、\s]*(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g;
+    while ((mm = re.exec(text))) {
+      var v = num(mm[2]);
+      var ctx = text.slice(Math.max(0, mm.index - 6), mm.index + mm[0].length);
+      if (WALK_NG.test(mm[1]) || /予定|仮称/.test(ctx)) continue;
+      if (v != null && v > 0 && v <= 120 && (b == null || v < b)) { b = v; st = cleanStation(mm[1]); }
+    }
+    if (b != null) return { minutes: b, station: st };
+    /* 「東海道線「甲子園口」徒歩7分」「JR東海道本線さくら夙川徒歩5分」のように
+       「駅」の字を省いて路線名の直後に駅名を書く形。
+       「駅」の字がある書き方の方が確実なので、そちらが無いときだけ使う。 */
+    var re2 = /線\s*[「『]?([^\s、。,\n()（）「」『』【】／/]{2,10}?)[」』]?\s*(?:駅)?\s*(?:まで|より|から)?\s*[…‥・.、\s]*(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g;
+    while ((mm = re2.exec(text))) {
+      var v2 = num(mm[2]);
+      if (WALK_NG.test(mm[1])) continue;
+      if (v2 != null && v2 > 0 && v2 <= 120 && (b == null || v2 < b)) { b = v2; st = cleanStation(mm[1]); }
+    }
+    return b == null ? null : { minutes: b, station: st };
+  }
+
+  /* 1) 図面の「交通」欄を最優先する。備考やおすすめ文の「〇〇駅まで徒歩n分」
+        「駅予定地まで徒歩約5分」を拾わないため。ラベルと値が行を分けていても読めるよう、
+        ラベルの後ろ2行ぶんを見る。 */
+  /* 「国土交通大臣」の「交通」は交通欄ではない */
+  var tr = /(?:^|[^土])(?:交通|最寄り?駅|アクセス)[\s:：／/・]*([^\n]*(?:\n[^\n]*){0,2})/g, tm;
+  while ((tm = tr.exec(s))) {
+    var r = scan(tm[1]);
+    if (!r) {
+      /* 表組みの交通欄は「阪急電鉄神戸線 西宮北口 ／ 徒歩 6」のように
+         駅・分の文字が別のマスに分かれることがある。交通欄の中に限り、
+         路線名の後ろの駅名と、「分」の無い徒歩の数字も読む。 */
+      var wm = tm[1].match(/(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})(?![0-9])/);
+      if (wm && !WALK_NG.test(tm[1].slice(0, wm.index))) {
+        var sm = tm[1].match(/線\s*[「『]?([^\s\n「」『』]{2,10}?)[」』]?\s*(?:駅|\n|$)/);
+        r = { minutes: num(wm[1]), station: sm ? cleanStation(sm[1]) : null };
+      }
+    }
+    if (r && r.minutes > 0 && r.minutes <= 120 && (best == null || r.minutes < best)) {
+      best = r.minutes; station = r.station;
     }
   }
-  if (best != null) return { minutes: best, station: station };
+  if (best != null && station) return { minutes: best, station: station };
 
-  /* 「〇〇 駅 徒歩 n 分」が崩れている図面向けの予備 */
-  var re2 = /(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分?/g;
+  /* 2) 資料全体から「〇〇駅 徒歩n分」を探す。
+        交通欄から分数しか取れなかったときも、駅名が分かればこちらを使う。 */
+  var all = scan(s);
+  if (all && (all.station || best == null)) return all;
+  if (best != null) return { minutes: best, station: null };
+
+  /* 3) 「駅」と「徒歩n分」が離れて書かれている図面向けの予備。
+        駅のすぐ近くにある徒歩だけを採用し、周辺施設の徒歩分数は使わない。 */
+  var re2 = /(?:徒歩|歩)\s*(?:約)?\s*([0-9]{1,3})\s*分/g;
   while ((m = re2.exec(s))) {
+    var before = s.slice(Math.max(0, m.index - 14), m.index);
+    if (!/駅/.test(before) || WALK_NG.test(before)) continue;
     var v2 = num(m[1]);
     if (v2 != null && v2 > 0 && v2 <= 120 && (best == null || v2 < best)) best = v2;
   }
@@ -858,6 +1000,7 @@ function trimName(v) {
   return String(v || '')
     .replace(/^[◆■▶◇□▷･・\s\u3000]+/, '')
     .replace(/[\s\u3000]*[0-9]{1,4}\s*号\s*室?$/, '')
+    .replace(/(?:リノベーション物件|リフォーム済み?|リノベ済み?)$/, '')
     .replace(/[\s\u3000]{2,}/g, ' ')
     .trim();
 }
@@ -875,8 +1018,15 @@ function looksBrokenName(v) {
   /* 日本語の中に半角英字が少しだけ混じるのも読み違いの跡。
      「ブランズTOKYO」のようにまとまった英字は正しい名前なので残す。 */
   var jp = (s.match(/[぀-ヿ一-鿿]/g) || []).length;
-  var en = (s.match(/[a-zA-Z]/g) || []).length;
+  /* 数えるのは小文字だけ。「カーサ楠III」「パークハウスN」のような
+     大文字（ローマ数字・棟名）は正しい名前によく使われる。 */
+  var en = (s.match(/[a-z]/g) || []).length;
   if (jp > 0 && en > 0 && en <= 3) return true;
+  /* 句読点を含むのは物件名ではなく説明文
+     （「テラス前は通路や道路がなく、外からの…」など） */
+  if (/[、。，．]|\.(?=[^0-9])/.test(s)) return true;
+  /* 助詞が続くのも説明文（「〜は〜や〜が」） */
+  if ((s.match(/[はがをやにでと](?=[^ァ-ヿー])/g) || []).length >= 3) return true;
   /* 常用しない漢字が続くのは読み違い（「團闢闔闠」など） */
   if (/[一-鿿]{2,}/.test(s)) {
     var rare = (s.match(/[閣-闿黑-鿿一-丏]/g) || []).length;
@@ -885,17 +1035,27 @@ function looksBrokenName(v) {
   return false;
 }
 
-function pickName(t, type) {
+/* strict: 文字認識だけで読んだ資料のとき true。
+   読み違いの多い文章から名前らしい行を拾うと、説明文や化けた文字列が
+   物件名になってしまうため、ラベル（「物件名」など）の付いた値だけを使う。 */
+function pickName(t, type, strict) {
   var s = tighten(t);
 
   /* ラベルのある図面（「建物名称 〇〇」）。
      スキャン資料では同じラベルが複数あったり値が崩れたりするため、
-     候補をすべて集め、名前として成り立つものだけから選ぶ。 */
-  var re = /(?:建物名称|建物名|マンション名|物件名称|物件名|名称)\s*[:：／/・]?\s*([^\n\r]{2,40})/g;
+     候補をすべて集め、名前として成り立つものだけから選ぶ。
+     ラベルと値が別の行に分かれている表組みもあるので、次の行も候補にする。 */
+  var re = /(?:建物名称|建物名|マンション名|物件名称|物件名|名称)[\s\u3000]*[:：／/・]?[\s\u3000]*([^\n\r]{2,40})?(?:\r?\n[\s\u3000]*([^\n\r]{2,40}))?/g;
   var m, cands = [];
   while ((m = re.exec(s))) {
-    var v = trimName(m[1]);
-    if (v && !NAME_NG.test(v) && v !== 'マンション' && !looksBrokenName(v)) cands.push(v);
+    var ok = function (raw) {
+      var v = trimName(raw);
+      return v && !NAME_NG.test(v) && v !== 'マンション' && !looksBrokenName(v) &&
+             !/(?:所在|住所|交通|価格|面積|間取|構造|築年|種目|種別)/.test(v) ? v : null;
+    };
+    /* 同じ行に値があればそれを使い、無いときだけ次の行を使う */
+    var v1 = ok(m[1]), v2 = v1 ? null : ok(m[2]);
+    if (v1 || v2) cands.push(v1 || v2);
   }
   if (cands.length) {
     /* 建物名らしい語を含むものを優先し、無ければ最も長いものを使う */
@@ -903,6 +1063,8 @@ function pickName(t, type) {
     var pool = hinted.length ? hinted : cands;
     return pool.reduce(function (a, b) { return b.length > a.length ? b : a; });
   }
+
+  if (strict) return null;
 
   /* ラベルが無い図面：建物名らしい行のうち最も長いものを使う */
   var best = null;
@@ -922,6 +1084,17 @@ function pickName(t, type) {
     if (addr) return addr + 'の' + (type === 'mansion' ? 'マンション' : type === 'house' ? '戸建' : '物件');
   }
   return null;
+}
+
+/* 本文から取れた物件名と、文字認識の結果を合わせて最終的な物件名を決める。
+   文字認識は読み違いが多く、説明文や化けた文字列を名前として拾いやすい。
+   そこで本文のラベル付きの名前を最優先し、次に文字認識のラベル付きの名前、
+   どちらも無ければ本文から組み立てた「〇〇のマンション」を使う。 */
+function mergeName(textName, ocrText, type) {
+  var built = textName && /の(?:マンション|戸建|物件)$/.test(textName);
+  if (textName && !built) return textName;
+  var fromOcr = ocrText ? pickName(normalizeOcr(ocrText), type, true) : null;
+  return fromOcr || textName || null;
 }
 
 /* 3-7b. 掲載してよい項目だけを取り出す（ホワイトリスト方式）
@@ -1501,16 +1674,57 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
          「不動産会社様のサイト制作を承ります」など、連絡先そのものではない行も並ぶ。
          それらを理由に切り取りを見送ると帯が丸ごと残ってしまうため、
          下端から上へ1行ずつ見て、物件情報の行に当たったところで止める。 */
+      /* 横一行の「白ではない画素の割合」。切る位置を余白に合わせるのに使う */
+      var inkAt = function (y, fx0, fx1) {
+        var d, a = Math.max(0, Math.floor(fx0 || 0)), b = Math.min(W, Math.ceil(fx1 == null ? W : fx1));
+        if (b - a < 2) return 0;
+        try { d = ctx.getImageData(a, Math.round(y), b - a, 1).data; } catch (e) { return 1; }
+        var n = 0, c = 0;
+        for (var x = 0; x < b - a; x += 3, c++) {
+          var i = x * 4;
+          /* 濃い点だけを数える。スキャン資料の地のくすみ（薄い灰色）は無視する */
+          if (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2] < 200) n++;
+        }
+        return c ? n / c : 1;
+      };
       var band = findBandTop(lines.map(function (ln) {
         var ty = Math.min.apply(null, ln.parts.map(function (q) { return q.y; }));
         var by = Math.max.apply(null, ln.parts.map(function (q) { return q.y + q.h; }));
+        var tx0 = Math.min.apply(null, ln.parts.map(function (q) { return q.x; }));
+        var tx1 = Math.max.apply(null, ln.parts.map(function (q) { return q.x + q.w; }));
         return {
           text: ln.parts.map(function (q) { return q.str; }).join(''),
-          y: ty, h: by - ty
+          y: ty, h: by - ty, x: tx0, w: tx1 - tx0
         };
-      }), H);
+      }), H, W, inkAt);
       var cutAt = band.cutAt;
       if (cutAt < H) cropped = H - cutAt;
+      /* 業者欄が物件情報の表と横に並ぶ配置では、切らずに業者欄のブロックだけを塗る */
+      if (band.box && band.grow) {
+        /* 業者欄の社名ロゴや大きな社名は、文字認識で崩れて位置が取れないことが多い。
+           塗る範囲を、その列で絵や文字が続いているところまで上へ広げる。
+           ただし小さな行間は越え、広い余白（段落の切れ目）で止める。
+           写真などを巻き込まないよう、広げるのは紙面の高さの8%まで。 */
+        var gx0 = band.box.x, gx1 = band.box.x + band.box.w, gy = band.box.y;
+        var stopAt = Math.max(H * LIMIT - H * 0.08, gy - H * 0.08), run = 0, lastInk = gy;
+        var need = Math.max(6, Math.round(H * 0.012));
+        var dense = 0, denseNeed = Math.max(6, Math.round(H * 0.008));
+        for (var yy = Math.floor(gy) - 1; yy >= stopAt; yy--) {
+          var ink = inkAt(yy, gx0, gx1);
+          if (ink < 0.004) { dense = 0; if (++run >= need) break; continue; }
+          run = 0;
+          /* 詰まった行が続くのは写真。細い罫線（1〜3画素）は越えて、写真の手前で止める */
+          if (ink > 0.45) { if (++dense >= denseNeed) { lastInk += 0; break; } continue; }
+          dense = 0; lastInk = yy;
+        }
+        band.box.h += band.box.y - lastInk; band.box.y = lastInk;
+      }
+      if (band.box) {
+        var bp = Math.max(4, H * 0.006);
+        paintOut(ctx, Math.max(0, band.box.x - bp), Math.max(0, band.box.y - bp),
+                 Math.min(W, band.box.w + bp * 2), Math.min(H, band.box.h + bp * 2), W, H);
+        masked += band.cutTexts.length;
+      }
 
       /* 予備：帯とは判定できなくても、下部に連絡先だけが固まっている場合は切る */
       if (cutAt >= H) {
@@ -1634,6 +1848,11 @@ function normalizeOcr(t) {
   t = t.replace(/[０-９]/g, function (ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); });
   /* 日本語のまわりの空白を取り除く（「徒 歩 4 分」→「徒歩4分」） */
   t = t.replace(/[ \t]+(?=[^\x00-\x7F])/g, '').replace(/([^\x00-\x7F])[ \t]+/g, '$1');
+  /* 漢字の直後のカタカナ「ロ」は、ほぼ漢字の「口」の読み違い
+     （甲子園ロ→甲子園口、西宮北ロ→西宮北口） */
+  t = t.replace(/([\u4e00-\u9fff])\u30ed/g, '$1\u53e3');
+  /* 旧字体に読み違えやすい字（甲子圓口→甲子園口） */
+  t = t.replace(/\u5713/g, '\u5712');
   /* 桁区切りのカンマが小数点に化けたものを戻す（5.880万円 → 5,880万円） */
   t = t.replace(/([0-9])\.([0-9]{3})(?![0-9])/g, '$1,$2');
   /* 社名まわりのよくある化け字 */
@@ -2081,6 +2300,7 @@ function handleFiles(fileList) {
                閾値を8文字に下げ、少ししか読み取れなくても活用する。 */
             if (im.ocrText && im.ocrText.replace(/\s/g, '').length >= 8) {
               var merged = extract((d.res.rawText || '') + '\n' + im.ocrText, ngWords());
+              merged.record.name = mergeName(d.res.record.name, im.ocrText, merged.record.type);
               merged.pageNo = d.res.pageNo;
               merged.filled = filledCount(merged.record);
               merged.record.sourceFile = d.res.record.sourceFile;
@@ -2537,7 +2757,8 @@ window.__RE = {
   renderRedactedPdf: renderRedactedPdf, isSensitiveText: isSensitiveText, pickPrice: pickPrice, pickWalk: pickWalk,
   tighten: tighten, looksLikeProperty: looksLikeProperty,
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
-  findBandTop: findBandTop, isSensitiveText: isSensitiveText, findBandByPixels: findBandByPixels,
+  findBandTop: findBandTop, findBandByPixels: findBandByPixels, filledCount: filledCount,
+  mergeName: mergeName, pickName: pickName, normalizeOcr: normalizeOcr,
   priceLabel: priceLabel, applyMode: applyMode, encodeWithinBudget: encodeWithinBudget, SHEET_BUDGET: SHEET_BUDGET, CONFIG: CONFIG
 };
 </script>

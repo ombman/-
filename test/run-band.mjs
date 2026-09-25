@@ -258,6 +258,78 @@ ok('帯の上の余白で切っている', px.cut !== null && px.cut > 880 && px
 ok('本文は切っていない', px.cut === null || px.cut > 870, `${px.cut}px`);
 ok('帯が無い紙面は切らない', px.cut2 === null, String(px.cut2));
 
+/* スクリーンショットで指摘された読み取りの誤り */
+console.log('\n-- 物件名：説明文やローマ数字の扱い');
+const nm = await p.evaluate(() => {
+  const R = window.__RE;
+  return {
+    sentence: R.mergeName(null, '回テラス前は通路や道路がなく.外からの、新築時売キ\n物件名\nジオ甲子園ロノーヴ', 'mansion'),
+    roman: R.extract('物件種目 マンション\n物件名 カーサ楠III\n号室名 303', []).record.name,
+    ocrGarbage: R.mergeName(null, '貰マンションコ拳ト\n価格 3,490万円', 'mansion'),
+    textFirst: R.mergeName('西宮北口ビューハイツ', '物件名 ゴミ文字列ハイツ', 'mansion'),
+    builtFallback: R.mergeName('兵庫県西宮市甲子園口5丁目6-5のマンション', '物件名 カーサ楠III', 'mansion'),
+  };
+});
+Object.entries(nm).forEach(([k,v])=>console.log(`   ${k} → ${JSON.stringify(v)}`));
+ok('説明文を物件名にせず、次の行の「物件名」を使う（ロ→口も直す）', nm.sentence === 'ジオ甲子園口ノーヴ', JSON.stringify(nm.sentence));
+ok('ローマ数字入りの物件名を読める', nm.roman === 'カーサ楠III', JSON.stringify(nm.roman));
+ok('文字認識の化けた行を物件名にしない', nm.ocrGarbage === null, JSON.stringify(nm.ocrGarbage));
+ok('本文の物件名を文字認識より優先する', nm.textFirst === '西宮北口ビューハイツ', JSON.stringify(nm.textFirst));
+ok('所在地から組み立てた名前より、文字認識のラベル付きの名前を使う', nm.builtFallback === 'カーサ楠III', JSON.stringify(nm.builtFallback));
+
+console.log('\n-- 駅名と徒歩：交通欄を優先し、周辺施設の徒歩は使わない');
+const wk = await p.evaluate(() => {
+  const W = t => { const r = window.__RE.pickWalk(t); return r ? (r.station || '') + '/' + r.minutes : null; };
+  return {
+    cosmo: W('◎阪急武庫川駅（仮称）計画決定！\n駅予定地まで徒歩約5分！\n交通 JR神戸線 甲子園口 駅 徒歩8分\n瓦林小学校・瓦木中学校区'),
+    amenity: W('交通 阪急神戸線「夙川」駅 徒歩4分\n周辺施設 スーパー徒歩3分 公園徒歩1分'),
+    backtick: W('交通 JR東海道本線`西宮」駅徒歩3分'),
+    mark: W('■阪神西宮駅徒歩4分 JR「西宮」駅徒歩10分'),
+    amenOnly: W('周辺施設 ライフ甲子園店 約350m（徒歩5分）ファミリーマート徒歩5分'),
+    noEki1: W('J R東海道本線甲子園口徒歩10分'),
+    noEki2: W('国土交通大臣免許(9)第34110号\n交通\n東海道線「甲子園口」徒歩7分'),
+    multi: W('交\n通 阪急夙川駅／JR さくら夙川駅／阪神香枦園駅 徒歩約7分\n各最寄駅 徒歩7分\n☆大型スーパー徒歩 3 分'),
+  };
+});
+Object.entries(wk).forEach(([k,v])=>console.log(`   ${k} → ${v}`));
+ok('交通欄の駅名と徒歩を使う（駅予定地の徒歩5分は使わない）', wk.cosmo === '甲子園口駅/8', wk.cosmo);
+ok('周辺施設の徒歩分数より交通欄を優先する', wk.amenity === '夙川駅/4', wk.amenity);
+ok('駅名に記号「`」が混じらない', wk.backtick === '西宮駅/3', wk.backtick);
+ok('駅名に記号「■」が混じらない', wk.mark === '阪神西宮駅/4', wk.mark);
+ok('周辺施設の徒歩しか無ければ空欄にする（誤った値を出さない）', wk.amenOnly === null, String(wk.amenOnly));
+ok('「駅」の字が無い書き方でも駅名を取る（路線名の直後）', wk.noEki1 === '甲子園口駅/10', wk.noEki1);
+ok('「国土交通大臣」を交通欄と取り違えない', wk.noEki2 === '甲子園口駅/7', wk.noEki2);
+ok('複数駅の併記でも駅名を取り、スーパーの徒歩3分は使わない', /駅\/7$/.test(wk.multi||''), wk.multi);
+
+console.log('\n-- 帯：備考欄の電話番号を帯の始まりと取り違えない');
+const memo = await p.evaluate(({ PAGE_H }) => window.__RE.findBandTop([
+  { y: 700, h: 14, x: 20, w: 400, text: '・採光面 南 日当たり良好' },
+  { y: 740, h: 14, x: 600, w: 380, text: '備考 担当者 携帯090-7346-3079までご連絡を' },
+  { y: 790, h: 14, x: 600, w: 380, text: '※諸条件ご相談ください。' },
+  { y: 900, h: 20, x: 20, w: 300, text: '株式会社Presia プレシア不動産 甲子園口店' },
+  { y: 902, h: 14, x: 500, w: 300, text: '宅建免許番号 兵庫県知事（1）第204713号' },
+  { y: 940, h: 14, x: 20, w: 500, text: 'TEL：0798-56-7222 FAX：0798-56-7223' },
+  { y: 950, h: 14, x: 800, w: 180, text: '取引態様：一般媒介 担当：仲川' },
+], PAGE_H, 1000), { PAGE_H });
+console.log(`   切り取り位置: ${memo.cutAt}px（備考の電話は740px・帯は900pxから）`);
+ok('帯の上端（社名）から切る', memo.isBand && memo.cutAt <= 900 && memo.cutAt > 804, `${memo.cutAt}px`);
+
+console.log('\n-- 帯：業者欄の横に物件情報の表が並ぶ配置は、業者欄だけを塗る');
+const col = await p.evaluate(({ PAGE_H }) => window.__RE.findBandTop([
+  { y: 860, h: 16, x: 20, w: 420, text: '商号 有限会社山祐商会' },
+  { y: 862, h: 12, x: 280, w: 170, text: '宅建免許番号/大阪府知事(5)第49077号' },
+  { y: 860, h: 14, x: 540, w: 420, text: '築年数 昭和63年4月 棟総戸数 9戸' },
+  { y: 900, h: 14, x: 20, w: 420, text: '事務所所在地 大阪市中央区平野町2丁目3番12号' },
+  { y: 900, h: 14, x: 540, w: 420, text: '現況 空室 入居 即日' },
+  { y: 940, h: 14, x: 20, w: 420, text: '電話番号 06-6209-1917' },
+  { y: 945, h: 14, x: 540, w: 420, text: '備考 トランクルーム有 1000円 TEL0798-36-3990' },
+  { y: 960, h: 14, x: 20, w: 420, text: 'ファクシミリ 06-6209-1918' },
+], PAGE_H, 1000), { PAGE_H });
+console.log(`   帯: ${col.isBand}　切り取り: ${col.cutAt}px　塗る範囲: ${JSON.stringify(col.box)}`);
+ok('横一直線には切らない（右の物件表を残す）', col.cutAt === PAGE_H, `${col.cutAt}px`);
+ok('左の業者欄だけを塗る', col.box && col.box.x + col.box.w <= 540 && col.box.y <= 860 && col.box.y + col.box.h >= 960,
+   JSON.stringify(col.box));
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
 process.exit(fail?1:0);
