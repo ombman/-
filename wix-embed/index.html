@@ -736,6 +736,15 @@ function pickPrice(t) {
   var s = zen2han(tighten(t));
   /* 「5,280 (税込) 万円」のように数字と「万円」の間に入る税の注記を取り除く */
   s = s.replace(/[(（]\s*(?:消費)?税\s*(?:込|別|抜)[みき]?\s*(?:価格)?\s*[)）]/g, ' ');
+  /* 千の位が別の行に分かれた数字（「4」「480」、カンマが図形で描かれている）をつなぐ */
+  s = s.replace(/(^|\n)[ \t]*([0-9]{1,3})[ \t]*\n[ \t]*([0-9]{3})[ \t]*(?=\n|$)/g, '$1$2,$3');
+  /* カンマの位置に見えない制御文字が入っている図面（「4␟290万円」） */
+  s = s.replace(/([0-9])[\x00-\x08\x0b-\x1f]([0-9]{3})/g, '$1,$2');
+  /* 「3,880萬」のような旧字の「萬」。価格の表示にしか使われないので、
+     「円」が無くても価格とみなす */
+  var man = s.match(/([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,6})\s*萬/);
+  if (man) { var mv = num(man[1]); if (mv >= 100 && mv <= 200000) return mv; }
+  s = s.replace(/萬/g, '万');
 
   var oku = s.match(/([0-9]+)\s*億\s*([0-9,]*)\s*万?円/);
   if (oku) {
@@ -765,11 +774,26 @@ function pickPrice(t) {
     var lm = lines[li].trim().match(/^([0-9]{1,3}(?:,[0-9]{3})*|[0-9]{3,6})\s*$/);
     if (!lm) continue;
     var lv = num(lm[1]);
+    /* 「4」「480」と千の位が別の行に分かれている（カンマが図形で描かれている）とき */
+    if (/^[0-9]{3}$/.test(lm[1]) && li > 0 && /^[0-9]{1,3}$/.test(lines[li - 1].trim())) {
+      lv = num(lines[li - 1].trim()) * 1000 + lv;
+    }
     if (lv < 100 || lv > 200000) continue;
     var ctx = lines.slice(Math.max(0, li - 2), Math.min(lines.length, li + 3)).join('\n');
     if (!/万円/.test(ctx)) continue;
     if (PRICE_NG.test(ctx)) continue;
     return lv;
+  }
+
+  /* 「3,880万」のように「円」が省かれた書き方。価格の欄がある資料に限る */
+  if (/価格|総額/.test(s)) {
+    var re3 = /([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,6})\s*万(?![0-9円])/g, m3;
+    while ((m3 = re3.exec(s))) {
+      var v3 = num(m3[1]);
+      if (v3 < 100 || v3 > 200000) continue;
+      if (PRICE_NG.test(s.slice(Math.max(0, m3.index - 16), m3.index))) continue;
+      return v3;
+    }
   }
 
   /* 「万円」の記載が見つからない資料では推測しない。
@@ -1328,6 +1352,11 @@ function extractAll(sections, extraWords, opts) {
     /* 表組みの図面では記録順だと項目名と値が離れることがある。
        紙面順に並べ直した文字からも読み、取れなかった数値の項目だけを補う。 */
     if (sections.alt && sections.alt[i]) fillMissing(res.record, extract(sections.alt[i], extraWords).record);
+    /* それでも価格が無ければ、紙面上の位置で「万円」と結びついた数字を使う */
+    if (res.record.priceMan == null && sections.geoPrice && sections.geoPrice[i] != null &&
+        !RENTAL_RE.test(body)) {
+      res.record.priceMan = sections.geoPrice[i];
+    }
     res.pageNo = i + 1;
     res.filled = filledCount(res.record);
 
@@ -1411,6 +1440,93 @@ function layoutText(items) {
   }).join('\n');
 }
 
+/* 紙面上の位置から価格を探す。
+   図面の価格は大きな数字（「3,780」）と小さな「万円」が別々に記録されることが多く、
+   文字データの並びでは両者が離れて読めない。「万円」のすぐ左（または左下）にある
+   数字を位置で結びつけ、いちばん大きな字のものを価格とする。 */
+function geoPrice(items) {
+  var its = [];
+  (items || []).forEach(function (it) {
+    if (!it || !it.str || !it.transform) return;
+    var h = Math.abs(it.height || it.transform[3] || 0) || 8;
+    its.push({ s: zen2han(String(it.str)).trim(), x: it.transform[4], y: it.transform[5], h: h,
+               w: it.width || String(it.str).length * h * 0.6 });
+  });
+  function sameRow(a, b) { return Math.abs(a.y - b.y) < Math.max(a.h, b.h) * 0.6; }
+  /* 「4」「480」のように千の位が別の文字として記録された数字をつなぐ
+     （カンマが図形で描かれている図面） */
+  var nums = [];
+  its.forEach(function (n) {
+    var m = n.s.match(/^([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{1,6})$/);
+    if (!m) return;
+    var v = num(m[1]), x = n.x, w = n.w;
+    if (/^[0-9]{3}$/.test(n.s)) {
+      var head = its.filter(function (t) {
+        return /^[0-9]{1,3}$/.test(t.s) && t !== n && sameRow(t, n) &&
+               n.x - (t.x + t.w) > -n.h * 0.3 && n.x - (t.x + t.w) < n.h * 1.2;
+      })[0];
+      if (head) { v = num(head.s) * 1000 + v; x = head.x; w = n.x + n.w - head.x; }
+    }
+    if (v >= 100 && v <= 200000) nums.push({ v: v, x: x, y: n.y, h: n.h, w: w, s: n.s });
+  });
+  var mans = its.filter(function (t) { return /^[万萬]/.test(t.s); });
+  function ngLeft(n) {
+    return its.some(function (t) {
+      return sameRow(t, n) && t.x < n.x && n.x - t.x < n.h * 12 && PRICE_NG.test(t.s);
+    });
+  }
+  var best = null;
+  nums.forEach(function (n) {
+    var near = mans.some(function (u) {
+      var dx = u.x - (n.x + n.w);
+      return dx > -n.h * 0.5 && dx < Math.max(n.h * 4, 40) &&   /* 数字のすぐ右 */
+             u.y > n.y - n.h * 0.8 && u.y < n.y + n.h * 0.9;    /* ほぼ同じ高さ（下付きも含む） */
+    });
+    if (!near || ngLeft(n)) return;
+    if (!best || n.h > best.h) best = n;
+  });
+  if (best) return best.v;
+  /* 「万円」が画像になっていて文字として無い図面向け。
+     他の文字よりずっと大きな「3,280」のような数字は価格とみなす。
+     月額費用のように「円」が付くもの、年や面積のような形の数字は除く。 */
+  var hs = its.map(function (t) { return t.h; }).sort(function (a, b) { return a - b; });
+  var med = hs.length ? hs[Math.floor(hs.length / 2)] : 0;
+  nums.forEach(function (n) {
+    if (!/,/.test(n.s) || n.v < 300 || n.v > 30000 || n.h < med * 2.5 || ngLeft(n)) return;
+    var yen = its.some(function (t) {
+      return /^円/.test(t.s) && sameRow(t, n) && t.x - (n.x + n.w) < n.h * 2 && t.x > n.x;
+    });
+    if (yen) return;
+    if (!best || n.h > best.h) best = n;
+  });
+  return best ? best.v : null;
+}
+
+/* 文字認識の行から価格を探す。スキャン資料では「万円」が崩れて読めないことが
+   多いため、他の行よりずっと大きな字で書かれた「3,390」のような数字を価格とみなす。
+   数字の間の空白（「3.3 9 0」）や小数点に化けたカンマも直してから読む。 */
+/* 賃貸の資料。大きな数字は家賃なので、価格の推測に使わない */
+var RENTAL_RE = /賃料|賃貸|家賃|敷金|礼金/;
+
+function ocrLinePrice(lines) {
+  if (!lines || !lines.length) return null;
+  var hs = lines.map(function (l) { return l.h || 0; }).sort(function (a, b) { return a - b; });
+  var med = hs[Math.floor(hs.length / 2)] || 0, best = null;
+  lines.forEach(function (l) {
+    if (!(l.h >= med * 2.2) || PRICE_NG.test(l.text)) return;
+    var t = zen2han(String(l.text || '')).replace(/([0-9])[\s]+(?=[0-9.,])/g, '$1')
+      .replace(/([0-9])\.([0-9]{3})(?![0-9])/g, '$1,$2');
+    var re = /([0-9]{1,3},[0-9]{3})(?![0-9])(\s*[^0-9\s]{0,2})/g, m;
+    while ((m = re.exec(t))) {
+      if (/^\s*円/.test(m[2])) continue;          /* 月額費用（「13,600円」） */
+      var v = num(m[1]);
+      if (v < 300 || v > 30000) continue;          /* 推測で採るのは3億円まで */
+      if (!best || l.h > best.h) best = { v: v, h: l.h };
+    }
+  });
+  return best ? best.v : null;
+}
+
 function readPdfFile(file) {
   if (!window.pdfjsLib) return Promise.reject(new Error('PDF読取ライブラリを読み込めませんでした'));
   return file.arrayBuffer()
@@ -1436,7 +1552,7 @@ function readPdfFile(file) {
               if (it.hasEOL) { out.push(line); line = ''; lastY = null; }
             });
             if (line) out.push(line);
-            return { stream: out.join('\n'), layout: layoutText(c.items) };
+            return { stream: out.join('\n'), layout: layoutText(c.items), price: geoPrice(c.items) };
           }));
       }
       /* ページごとの配列として返す。記録順の文字を基本とし、
@@ -1444,6 +1560,7 @@ function readPdfFile(file) {
       return Promise.all(jobs).then(function (pages) {
         var out = pages.map(function (p) { return p.stream; });
         out.alt = pages.map(function (p) { return p.layout; });
+        out.geoPrice = pages.map(function (p) { return p.price; });
         return out;
       });
     });
@@ -1716,7 +1833,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
     .then(function () { return page.getTextContent(); })
     .then(function (content) {
       var H = canvas.height, W = canvas.width;
-      var ocrText = null;
+      var ocrText = null, ocrPrice = null;
 
       /* PDFは1行が複数の断片に分かれることがあり、「TEL：03-」「1234-5678」のように
          切れていると断片単位では検出できない。そこで同じ行の断片をまとめ、
@@ -1753,6 +1870,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
           .then(function () { return Ocr.read(big); })
           .then(function (o) {
             ocrText = o.text;
+            ocrPrice = ocrLinePrice(o.lines);
             /* 読み取り用の画像は大きいので、位置を表示用の大きさに戻す */
             var ls = o.lines.map(function (l) {
               var x = l.x / zoom, y = l.y / zoom, w = l.w / zoom, h = l.h / zoom;
@@ -1970,7 +2088,8 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
                    x: Math.round(Math.min.apply(null, ln.parts.map(function (q) { return q.x; }))),
                    s: isSensitiveText(ln.parts.map(function (q) { return q.str; }).join(''), extraWords, ln.ocr) };
         }) } : undefined,
-        ocrText: ocrText
+        ocrText: ocrText,
+        ocrPrice: ocrPrice   /* 文字認識で大きな字として読めた価格（無ければ null） */
       };
       }
     });
@@ -2041,6 +2160,11 @@ function normalizeOcr(t) {
   t = t.replace(/([\u4e00-\u9fff])\u30ed/g, '$1\u53e3');
   /* 旧字体に読み違えやすい字（甲子圓口→甲子園口） */
   t = t.replace(/\u5713/g, '\u5712');
+  /* 価格の数字の間に入った空白を詰め、「万」の読み違い（下・方・力）を直す
+     （「4. 780下円」→「4.780万円」→ 下の処理で「4,780万円」） */
+  t = t.replace(/([0-9][0-9 .,，]{2,12})(\s*[万下方力]\s*円)/g, function (m, a, b) {
+    return a.replace(/\s+/g, '') + b.replace(/[下方力]/, '万');
+  });
   /* 桁区切りのカンマが小数点に化けたものを戻す（5.880万円 → 5,880万円） */
   t = t.replace(/([0-9])\.([0-9]{3})(?![0-9])/g, '$1,$2');
   /* 社名まわりのよくある化け字 */
@@ -2471,7 +2595,9 @@ function handleFiles(fileList) {
            画像から文字認識で読み直す（文字データが一部しかない資料が多いため） */
         var ocrPages = {};
         results.forEach(function (r) {
-          if (r.noText || r.filled < 3) ocrPages[r.pageNo] = true;
+          /* 価格が取れなかったページも読み直す。大きな価格の数字は
+             文字データに入っていない（図形として描かれている）ことがあるため */
+          if (r.noText || r.filled < 3 || r.record.priceMan == null) ocrPages[r.pageNo] = true;
         });
         var attached = 0, cut = 0, painted = 0, ocred = 0, manual = 0, done = 0;
 
@@ -2489,6 +2615,8 @@ function handleFiles(fileList) {
             if (im.ocrText && im.ocrText.replace(/\s/g, '').length >= 8) {
               var merged = extract((d.res.rawText || '') + '\n' + im.ocrText, ngWords());
               merged.record.name = mergeName(d.res.record.name, im.ocrText, merged.record.type);
+              if (merged.record.priceMan == null && im.ocrPrice != null &&
+                  !RENTAL_RE.test((d.res.rawText || '') + im.ocrText)) merged.record.priceMan = im.ocrPrice;
               merged.pageNo = d.res.pageNo;
               merged.filled = filledCount(merged.record);
               merged.record.sourceFile = d.res.record.sourceFile;
@@ -2503,6 +2631,14 @@ function handleFiles(fileList) {
               }
               if (d.res.filled > 0) d.res.noText = false;
               ocred++;
+            }
+            /* 文字認識で大きな字の価格だけ読めた場合も取り込む */
+            /* 賃貸の資料では大きな数字は家賃なので、価格の推測はしない */
+            if (d.res.record.priceMan == null && im.ocrPrice != null &&
+                !RENTAL_RE.test((d.res.rawText || '') + (im.ocrText || ''))) {
+              d.res.record.priceMan = im.ocrPrice;
+              d.res.filled = filledCount(d.res.record);
+              changed = true;
             }
             d.res.sheet = im;
 
@@ -2947,6 +3083,7 @@ window.__RE = {
   pickAge: pickAge, pickArea: pickArea, pickShare: pickShare, detectType: detectType,
   findBandTop: findBandTop, findBandByPixels: findBandByPixels, filledCount: filledCount,
   mergeName: mergeName, pickName: pickName, normalizeOcr: normalizeOcr, findBandByGaps: findBandByGaps,
+  geoPrice: geoPrice, ocrLinePrice: ocrLinePrice, RENTAL_RE: RENTAL_RE,
   priceLabel: priceLabel, applyMode: applyMode, encodeWithinBudget: encodeWithinBudget, SHEET_BUDGET: SHEET_BUDGET, CONFIG: CONFIG
 };
 </script>

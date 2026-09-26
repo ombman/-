@@ -37,7 +37,7 @@ const res = await p.evaluate(async (only) => {
   const secs = await RE.readPdfFile(file);
   const all = RE.extractAll(secs, [], { keepEmpty: true });
   const ocrPages = {};
-  all.forEach(r => { if (r.noText || r.filled < 3) ocrPages[r.pageNo] = true; });
+  all.forEach(r => { if (r.noText || r.filled < 3 || r.record.priceMan == null) ocrPages[r.pageNo] = true; });
   const imgs = {};
   await RE.renderRedactedPdf(file, [], { ocrPages, onPage: im => { imgs[im.pageNo] = im; } });
   /* 元の紙面も同じ大きさで描いておく（比較用） */
@@ -50,8 +50,10 @@ const res = await p.evaluate(async (only) => {
     if (im.ocrText && im.ocrText.replace(/\s/g, '').length >= 8) {
       merged = RE.extract((r.rawText || '') + '\n' + im.ocrText, []);
       merged.record.name = RE.mergeName(r.record.name, im.ocrText, merged.record.type);
+      if (merged.record.priceMan == null && im.ocrPrice != null && !RE.RENTAL_RE.test((r.rawText||'')+im.ocrText)) merged.record.priceMan = im.ocrPrice;
       if (RE.filledCount(merged.record) >= r.filled) rec = merged.record;
     }
+    if (rec.priceMan == null && im.ocrPrice != null && !RE.RENTAL_RE.test((r.rawText||'')+(im.ocrText||''))) rec = Object.assign({}, rec, { priceMan: im.ocrPrice });
     const pg = await pdf.getPage(r.pageNo);
     const vp = pg.getViewport({ scale: 1.6 });
     const cv = document.createElement('canvas');

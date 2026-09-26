@@ -427,6 +427,37 @@ ok('見出し行の次の行の最初の欄を名前にする', nm2.table === '�
 ok('情報元を消した跡［削除済み］を名前に含めない', nm2.redacted === 'プラウド夙川コートテラス', JSON.stringify(nm2.redacted));
 ok('「甲子園ロ」を「甲子園口」に直す', nm2.kataRo === 'ジオ甲子園口ノーヴ', JSON.stringify(nm2.kataRo));
 
+/* 実物の販売図面で価格が読めなかった書き方 */
+console.log('\n-- 価格：実物の図面の書き方');
+const pr = await p.evaluate(() => {
+  const R = window.__RE, P = t => R.pickPrice(t);
+  /* 紙面上の文字（x, y は PDF 座標で下から上、h は字の高さ） */
+  const it = (s, x, y, h, w) => ({ str: s, transform: [h, 0, 0, h, x, y], height: h, width: w });
+  return {
+    split: P('価格\n\n4\n480\n\n万\n\n交通'),
+    ctrl: P('ダイアパレス甲子園 403 号室\n\n4\u001f290万円'),
+    kanji: P('バルコニー\n9.60\nm\n\n3,880萬\n\n流通機会の極めて'),
+    geoNear: R.geoPrice([it('3,780', 102, 503, 11, 54), it('万円', 193, 510, 9, 17), it('18,530円/月', 101, 252, 7, 71)]),
+    geoBig: R.geoPrice([it('3,280', 434, 525, 36, 87), it('8,190円', 683, 267, 7, 24), it('管理費', 600, 267, 7, 20),
+                        it('所在地', 50, 400, 7, 20), it('西宮市', 80, 400, 7, 20)]),
+    geoSplit: R.geoPrice([it('5', 300, 600, 30, 16), it('480', 320, 600, 30, 50), it('万', 380, 600, 12, 12)]),
+    geoFee: R.geoPrice([it('13,600', 300, 600, 30, 80), it('円', 385, 600, 12, 12), it('所在地', 50, 400, 7, 20)]),
+    ocr: R.ocrLinePrice([{ text: '&リビングにエアコン付き 3.3 9 0 e', h: 60 }, { text: '西宮市熊野町8-13', h: 20 },
+                         { text: '管理費 13,600 円/月', h: 20 }, { text: 'JR神戸線 甲子園口駅 徒歩8分', h: 20 }]),
+    rental: R.RENTAL_RE.test('賃料 67,000 円 共益費 3,000円'),
+  };
+});
+Object.entries(pr).forEach(([k,v])=>console.log(`   ${k} → ${JSON.stringify(v)}`));
+ok('千の位が別の行に分かれた「4」「480」「万」を4,480万円と読む', pr.split === 4480, String(pr.split));
+ok('カンマの位置の制御文字「4␟290万円」を読む', pr.ctrl === 4290, String(pr.ctrl));
+ok('旧字の「3,880萬」を読む', pr.kanji === 3880, String(pr.kanji));
+ok('紙面上で「万円」のすぐ右にある数字を結びつける', pr.geoNear === 3780, String(pr.geoNear));
+ok('「万円」が画像でも、極端に大きな「3,280」を価格とする', pr.geoBig === 3280, String(pr.geoBig));
+ok('別々の文字の「5」「480」を5,480として結びつける', pr.geoSplit === 5480, String(pr.geoSplit));
+ok('大きくても「円」が付く数字（月額）は価格にしない', pr.geoFee === null, String(pr.geoFee));
+ok('文字認識の「3.3 9 0」（大きな字）を3,390と読む', pr.ocr === 3390, String(pr.ocr));
+ok('賃貸の資料を見分ける（大きな数字を価格と推測しない）', pr.rental === true, String(pr.rental));
+
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();
 process.exit(fail?1:0);
