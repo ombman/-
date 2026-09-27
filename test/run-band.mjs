@@ -368,11 +368,23 @@ ok('電話番号が同じ行にあれば塗る：' + keep[6].t, keep[6].got === 
    紙面の余白を境目にして帯を切る判定を、余白の位置を与えて確かめる。 */
 console.log('\n-- 余白を境目に帯を切る（実物の図面の配置）');
 const gp = await p.evaluate(() => {
-  const G = (lines, blanks) => {
+  const G = (lines, blanks, loose) => {
     const ink = y => blanks.some(([a, b]) => y >= a && y <= b) ? 0 : 0.2;
-    const r = window.__RE.findBandByGaps(lines, 1000, ink);
+    const r = window.__RE.findBandByGaps(lines, 1000, ink, loose);
     return r ? r.cutAt : null;
   };
+  /* スキャン資料：帯の「TEL」が文字認識で崩れ、社名と「宅建業者様専用」だけが読めた */
+  const scanBand = [
+    { y: 800, h: 12, x: 50, w: 300, text: '・西宮市役所まで約370m徒歩5分' },
+    { y: 830, h: 14, x: 960, w: 200, text: '【宅建業者様専用】' },
+    { y: 860, h: 14, x: 420, w: 400, text: 'T向じ1050-3]]2-8244詣屍' },
+    { y: 900, h: 14, x: 110, w: 300, text: '*封住又不動産ステップ株式会社' },
+  ];
+  /* 余白より下が物件概要の欄（施工会社）だけのときは、ゆるめの判定でも切らない */
+  const attrOnly = [
+    { y: 800, h: 12, x: 50, w: 300, text: '・西宮市役所まで約370m徒歩5分' },
+    { y: 860, h: 14, x: 50, w: 400, text: '施工会社：大鉄工業株式会社' },
+  ];
   return {
     /* 三井住友トラスト：帯のすぐ上に周辺施設の行 */
     amenity: G([
@@ -393,12 +405,18 @@ const gp = await p.evaluate(() => {
       { y: 850, h: 12, x: 600, w: 380, text: '○鍵交換費用 22,000円(税込)' },
       { y: 860, h: 16, x: 20, w: 400, text: '安田建物管理㈱ TEL:0798-34-6963' },
     ], [[836, 842]]),
+    scanStrict: G(scanBand, [[812, 820]]),
+    scanLoose: G(scanBand, [[812, 820]], true),
+    attrLoose: G(attrOnly, [[812, 820]], true),
   };
 });
 console.log(`   ${JSON.stringify(gp)}`);
 ok('帯の上の周辺施設の行を残して切る', gp.amenity === 843, String(gp.amenity));
 ok('帯の上の「現況：空」「引渡日：相談」を残して切る', gp.shortVal === 853, String(gp.shortVal));
 ok('帯の横に備考欄がある配置では余白で切らない（備考の費用を残す）', gp.besideMemo === null, String(gp.besideMemo));
+ok('従来の判定は目印（TEL等）が読めない帯を切らない（結果を変えない）', gp.scanStrict === null, String(gp.scanStrict));
+ok('スキャン資料：TELが崩れても社名・宅建業者様専用で帯と判断して切る', gp.scanLoose === 816, String(gp.scanLoose));
+ok('スキャン資料：余白の下が物件概要の会社欄だけなら切らない', gp.attrLoose === null, String(gp.attrLoose));
 
 /* 実物の販売図面で物件名に入っていた、社名・キャッチコピー・種別名 */
 console.log('\n-- 物件名：社名・キャッチコピーを名前にしない');
@@ -457,6 +475,56 @@ ok('別々の文字の「5」「480」を5,480として結びつける', pr.geoS
 ok('大きくても「円」が付く数字（月額）は価格にしない', pr.geoFee === null, String(pr.geoFee));
 ok('文字認識の「3.3 9 0」（大きな字）を3,390と読む', pr.ocr === 3390, String(pr.ocr));
 ok('賃貸の資料を見分ける（大きな数字を価格と推測しない）', pr.rental === true, String(pr.rental));
+
+console.log('\n-- スキャン資料（文字データの無いページ）の読み取り');
+const sc = await p.evaluate(() => {
+  const R = window.__RE;
+  /* 実物の販売図面を文字認識した結果の形（見出し表「価格｜交通｜名称」の値が後ろに並ぶ） */
+  const header = '価格\n交通\n名称\n階数\n東海道本線`西宮」駅徒歩10分\n阪急神戸線`西宮北口」駅徒歩13分\nサンクレイドル西宮北口\n4,780ヵ円\n阪神本線`西宮」駅徒歩19分\n3階\n所在';
+  const ocrRes = (dense, sparse, price) => R.mergeOcrResult(
+    { rawText: '', record: { priceMan: null, name: null, sourceFile: 'a.pdf' }, pageNo: 1, filled: 0 },
+    { ocrText: R.normalizeOcr(dense), ocrSparse: R.normalizeOcr(sparse), ocrPrice: price }, []);
+  const m1 = ocrRes('中古マンション 専有面積 65.21㎡', header, null).record;
+  return {
+    unit: R.normalizeOcr('4,780ヵ円 / 3,999ぅp / 5980万有'),
+    headerName: m1.name, headerPrice: m1.priceMan, headerType: m1.type,
+    dotName: R.pickNameOcr('物件名\n談阪神本線`甲子園」駅徒歩6分\n3,490万円\nネオ.ディ甲子園高潮\n所在'),
+    decoName: R.pickNameOcr('ニジオ甲子園口ノーヴ=ニ\n華美でなく'),
+    partName: R.pickNameOcr('リーンハイツ\n甲子園口グリーンハイツ\nマンション'),
+    noEquip: R.pickNameOcr('名称\nテラス無\n専用庭無'),
+    noShop: R.pickNameOcr('お客様のステップアップをお手伝い西宮マンションプラザ\nペット可(規約あり)\nライフ阪神鳴尾店'),
+    vote1: R.voteOcrPrice([5980, 980, null]),
+    vote2: R.voteOcrPrice([null, 590, 3590]),
+    vote3: R.voteOcrPrice([4780, null, null]),
+    txt1: R.pickPriceByText([14715, 3799], '管理費 14,715円/月\n価格 3,799 万円'),
+    txt2: R.pickPriceByText([13390], 'コスモハイツ 3,390万円'),
+    txt3: R.pickPriceByText([4480], '(斜体の価格は日本語の辞書では読めない)'),
+    area: ocrRes('専有面積 51.30㎡ (15.5坪) 中古マンション 価格', '中古マンション 価用部分面積151.30㎡ (15.5坪)', null).record.ownArea,
+    blockEmpty: R.publishBlockReason({ record: { type: 'unknown', name: '', priceMan: null } }),
+    blockPending: R.publishBlockReason({ ocrPending: true, record: { type: 'mansion', name: 'A', priceMan: 1000 } }),
+    blockOk: R.publishBlockReason({ record: { type: 'mansion', name: 'サンクレイドル西宮北口', priceMan: 4780 } }),
+  };
+});
+Object.entries(sc).forEach(([k,v])=>console.log(`   ${k} → ${JSON.stringify(v)}`));
+ok('「万円」の化け（ヵ円・ぅp・万有）を直す', ['4,780万円', '3,999万円', '5980万円'].every(x => sc.unit.includes(x)), sc.unit);
+ok('見出し表の後ろに並ぶ値から物件名を読む', sc.headerName === 'サンクレイドル西宮北口', String(sc.headerName));
+ok('見出し表の価格を読む', sc.headerPrice === 4780, String(sc.headerPrice));
+ok('スキャン資料の種別をマンションと判定する', sc.headerType === 'mansion', String(sc.headerType));
+ok('中黒の化け「ネオ.ディ」を直して物件名にする', sc.dotName === 'ネオ・ディ甲子園高潮', String(sc.dotName));
+ok('飾り記号と行頭のかけらを除いて物件名にする', sc.decoName === 'ジオ甲子園口ノーヴ', String(sc.decoName));
+ok('欠けた名前より完全な名前を選ぶ', sc.partName === '甲子園口グリーンハイツ', String(sc.partName));
+ok('設備欄の値（テラス無）を物件名にしない', sc.noEquip === null, String(sc.noEquip));
+ok('仲介店舗名・設備・周辺施設を物件名にしない', sc.noShop === null, String(sc.noShop));
+ok('先頭の桁が落ちた読み（980）より完全な読み（5,980）を採る', sc.vote1 === 5980, String(sc.vote1));
+ok('桁落ちの候補があっても完全な候補を採る', sc.vote2 === 3590, String(sc.vote2));
+ok('候補が1つならそれを採る', sc.vote3 === 4780, String(sc.vote3));
+ok('月額費用（14,715円）より「万円」付きの価格（3,799万円）を採る', sc.txt1 === 3799, String(sc.txt1));
+ok('頭に「1」が付いた読み違い（13,390）を紙面の「3,390万円」で直す', sc.txt2 === 3390, String(sc.txt2));
+ok('紙面の文字で確かめられなくても数字の辞書の値を使う', sc.txt3 === 4480, String(sc.txt3));
+ok('面積が食い違うときは坪数と合うほう（51.30㎡）を採る', sc.area === 51.3, String(sc.area));
+ok('種別・物件名・価格が空の物件は掲載させない', /種別/.test(sc.blockEmpty) && /物件名/.test(sc.blockEmpty) && /価格/.test(sc.blockEmpty), sc.blockEmpty);
+ok('文字認識の途中は掲載させない', /読み取り中/.test(sc.blockPending), sc.blockPending);
+ok('必要な項目がそろえば掲載できる', sc.blockOk === '', JSON.stringify(sc.blockOk));
 
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();

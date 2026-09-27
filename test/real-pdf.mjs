@@ -46,12 +46,15 @@ const res = await p.evaluate(async (only) => {
   for (const r of all) {
     if (only.length && only.indexOf(r.pageNo) < 0) continue;
     const im = imgs[r.pageNo] || {};
-    let rec = r.record, merged = null;
-    if (im.ocrText && im.ocrText.replace(/\s/g, '').length >= 8) {
-      merged = RE.extract((r.rawText || '') + '\n' + im.ocrText, []);
-      merged.record.name = RE.mergeName(r.record.name, im.ocrText, merged.record.type);
-      if (merged.record.priceMan == null && im.ocrPrice != null && !RE.RENTAL_RE.test((r.rawText||'')+im.ocrText)) merged.record.priceMan = im.ocrPrice;
-      if (RE.filledCount(merged.record) >= r.filled) rec = merged.record;
+    let rec = r.record;
+    const merged = RE.mergeOcrResult(r, im, []);
+    if (merged) {
+      if (merged.filled >= r.filled) rec = merged.record;
+      else {
+        rec = Object.assign({}, rec);
+        if (!rec.name && merged.record.name) rec.name = merged.record.name;
+        if (rec.type !== 'house' && rec.type !== 'mansion') rec.type = merged.record.type;
+      }
     }
     if (rec.priceMan == null && im.ocrPrice != null && !RE.RENTAL_RE.test((r.rawText||'')+(im.ocrText||''))) rec = Object.assign({}, rec, { priceMan: im.ocrPrice });
     const pg = await pdf.getPage(r.pageNo);
@@ -64,7 +67,7 @@ const res = await p.evaluate(async (only) => {
       name: rec.name, type: rec.type, priceMan: rec.priceMan, walkMin: rec.walkMin, station: rec.station,
       age: rec.ageYears, built: rec.builtLabel, ownArea: rec.ownArea, floorArea: rec.floorArea, share: rec.share,
       masked: im.masked, croppedPx: im.croppedPx, overPaint: im.overPaint,
-      rawText: (secs[r.pageNo-1]||'').slice(0, 1500), ocrText: (im.ocrText||'').slice(0, 1500),
+      rawText: (secs[r.pageNo-1]||'').slice(0, 1500), ocrText: (im.ocrText||'').slice(0, 3000), ocrSparse: (im.ocrSparse||'').slice(0, 3000),
       orig: cv.toDataURL('image/jpeg', 0.7), outImg: im.dataUrl || null
     });
   }
