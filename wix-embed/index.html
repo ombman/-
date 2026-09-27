@@ -349,7 +349,8 @@ var CONFIG = {
      Velo 接続時はサーバ側（Wix シークレットマネージャー）で検証されるため使われない。
      このHTMLは訪問者から読めるため、既定値のままにしないこと。 */
   FALLBACK_PASSWORD: 'Jmt2sB9fxDWbreIysO',
-  BRIDGE_TIMEOUT_MS: 4000,
+  BRIDGE_TIMEOUT_MS: 4000,          /* Wixにつながっているかを確かめるときの待ち時間 */
+  BRIDGE_SAVE_TIMEOUT_MS: 120000,   /* つながったあとの保存・一覧の待ち時間（画像付きの保存は数秒〜数十秒かかる） */
   /* pdf.js の配信元。日本語（CIDフォント）PDFの読み取りに cmaps / standard_fonts が必須 */
   PDFJS_BASE: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/',
   /* スキャン資料（文字データの無いPDF）を画像から読み取るための文字認識エンジン */
@@ -1838,6 +1839,7 @@ function pickPriceByText(found, texts) {
   };
   var near = function (v) { return new RegExp('(?:^|[^0-9,])' + forms(v) + '[^0-9]{0,2}万').test(T); };
   var fee = function (v) { return new RegExp('(?:^|[^0-9,])' + forms(v) + '円').test(T); };
+  var area = function (v) { return new RegExp('(?:^|[^0-9,])' + forms(v) + '[.0-9]*\\s*(?:㎡|m²|m2|平米|坪|m[^a-z]|m$)').test(T); };
   var any = function (v) { return new RegExp('(?:^|[^0-9,])' + forms(v)).test(T); };
   var cands = found.map(function (v, i) {
     if (v >= 10000 && String(v).charAt(0) === '1') {
@@ -1846,6 +1848,8 @@ function pickPriceByText(found, texts) {
     }
     var sc = near(v) ? 3 : any(v) ? 1 : 0;
     if (fee(v) && !near(v)) sc = -3;
+    /* 「1,165㎡」「780.77坪」のように面積として書かれた数字は価格ではない */
+    if (area(v) && !near(v)) sc = -3;
     return { v: v, sc: sc, i: i };
   }).filter(function (c) { return c.sc >= 0; });
   if (!cands.length) return null;
@@ -2112,7 +2116,9 @@ function ringHasInk(ctx, nx, ny, nw, nh, x, y, w, h, base) {
 /* 掲載できる大きさに収めて画像にする。
    写真の多い販売図面はそのままだと大きくなりすぎ、保存時に弾かれて
    「図面が出ない」状態になるため、収まるまで画質と大きさを落とす。 */
-var SHEET_BUDGET = 700000;   /* data URL の文字数の上限（保存側の上限900,000に余裕を持たせる） */
+/* data URL の文字数の上限。Wixのデータベースは1件512KBまでで、図面の画像に
+   物件概要などの文字も加わるため、画像は40万文字（約40万バイト）までに抑える */
+var SHEET_BUDGET = 400000;
 function encodeWithinBudget(canvas) {
   var quals = [0.72, 0.62, 0.52, 0.44, 0.36];
   var cv = canvas, scale = 1, best = null;
@@ -2393,6 +2399,22 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         }
         band.box.h += band.box.y - lastInk; band.box.y = lastInk;
       }
+      /* 業者欄のブロックだけを塗る判定になっても、その高さより下に物件情報（値の行）が
+         無ければ、ページ幅いっぱいで切り取る。ブロックの外にある業者帯の飾り
+         （色帯のかけら・「登録No.」「取引態様」の枠など）が残らないようにするため */
+      if (band.box && band.box.y >= H * LIMIT - H * 0.08) {
+        var boxTop = band.box.y;
+        var keepBelow = bandLines.concat(extraBandLines || []).some(function (l) {
+          if (l.y + (l.h || 0) <= boxTop) return false;
+          var t = l.text || '';
+          return bandIsValue(t) && !bandIsHint(t) && !bandIsLooseHint(t);
+        });
+        if (!keepBelow) {
+          band = { cutAt: Math.max(Math.floor(H * LIMIT), Math.floor(boxTop) - 4), isBand: true,
+                   cutTexts: band.cutTexts || [] };
+        }
+      }
+      if (!band.box && band.cutAt < cutAt) { cutAt = band.cutAt; cropped = H - cutAt; }
       if (band.box) {
         var bp = Math.max(4, H * 0.006);
         fillBox(ctx, Math.max(0, band.box.x - bp), Math.max(0, band.box.y - bp),
@@ -2536,7 +2558,7 @@ function normalizeOcr(t) {
      （甲子園ロ→甲子園口、西宮北ロ→西宮北口） */
   t = t.replace(/([\u4e00-\u9fff])\u30ed/g, '$1\u53e3');
   /* 旧字体に読み違えやすい字（甲子圓口→甲子園口、甲子國口→甲子園口） */
-  t = t.replace(/\u5713/g, '\u5712').replace(/甲子[國国]/g, '甲子園');
+  t = t.replace(/\u5713/g, '\u5712').replace(/甲子[國国]/g, '甲子園').replace(/[田用申]子[園國]/g, '甲子園');
   /* 路線名の「本線」の読み違い（東海道本綺・阪神本縄）と、駅名の読み違い（香檀園駅→香櫨園駅） */
   t = t.replace(/本[綺縄緯]/g, '本線').replace(/香[檀枦炉]園駅/g, '香櫨園駅');
   /* 建物名の末尾「ハイツ」の「ツ」が小さい「ッ」になる読み違い */
@@ -2717,9 +2739,16 @@ var Bridge = (function () {
   window.addEventListener('message', function (ev) {
     var d = ev.data;
     if (!d || typeof d !== 'object' || d.channel !== 'reLp') return;
+    /* Wixのページコードからの合図（表示の切り替え）が届いた＝Wixにつながっている */
+    if (d.action === 'setMode') connected = true;
     if (d.rid && pending[d.rid]) { pending[d.rid](d); delete pending[d.rid]; }
   });
 
+  /* Wixにつながっているかの確認は短い待ち時間で行う（つながっていなければ
+     このブラウザ内の保存に切り替える）。一度つながったと分かったあとは、
+     保存に時間がかかっても待ち続け、時間切れはエラーとして知らせる。
+     以前は4秒で打ち切っていたため、画像付きの保存や文字認識の最中に時間切れになり、
+     Wixに保存されないまま（このブラウザ内にだけ保存されて）消えていた。 */
   function call(action, payload) {
     return new Promise(function (resolve) {
       if (window.parent === window) return resolve(null);
@@ -2728,9 +2757,17 @@ var Bridge = (function () {
       pending[rid] = function (d) { done = true; connected = true; resolve(d); };
       try { window.parent.postMessage({ channel: 'reLp', rid: rid, action: action, payload: payload }, '*'); }
       catch (e) { return resolve(null); }
+      var wait = connected === true ? CONFIG.BRIDGE_SAVE_TIMEOUT_MS : CONFIG.BRIDGE_TIMEOUT_MS;
       setTimeout(function () {
-        if (!done) { delete pending[rid]; if (connected === null) connected = false; resolve(null); }
-      }, CONFIG.BRIDGE_TIMEOUT_MS);
+        if (done) return;
+        delete pending[rid];
+        if (connected === true) {
+          resolve({ ok: false, timeout: true, error: 'Wixからの応答がありませんでした（時間切れ）。通信状態を確かめて、もう一度掲載してください' });
+          return;
+        }
+        if (connected === null) connected = false;
+        resolve(null);
+      }, wait);
     });
   }
   return { call: call, isConnected: function () { return connected === true; } };
@@ -2795,6 +2832,9 @@ var Store = {
   list: function () {
     return Bridge.call('list').then(function (r) {
       if (r && r.ok) { Store.mode = 'wix'; return r.items || []; }
+      /* Wixにつながっているのに一覧を取れなかったときは、このブラウザ内の一覧で
+         置き換えない（Wixの掲載内容と食い違うため）。表示は前回のまま残す */
+      if (r && !r.ok) { Store.mode = 'wix'; return null; }
       Store.mode = 'local'; return lsRead();
     });
   },
@@ -2860,7 +2900,6 @@ function cardHtml(p) {
     '<h3>' + esc(p.name || '物件情報') + '</h3>' +
     '<div class="price">' + (p.priceMan != null ? esc(priceLabel(p.priceMan)) : '<span class="na">価格はお問い合わせください</span>') + '</div>' +
     '<ul class="specs">' + specs + '</ul>' +
-    '<p class="note">※ 情報元（会社名・電話番号・担当者名等）は掲載しておりません。</p>' +
     (p.sheetImage ? '<div style="padding:0 16px 12px">' +
       '<img class="sheet-thumb" src="' + esc(p.sheetImage) + '" alt="掲載資料をクリックで拡大" loading="lazy" ' +
       'style="width:100%;border:1px solid var(--line);border-radius:9px;display:block">' +
@@ -3041,9 +3080,10 @@ function handleFiles(fileList) {
              文字データに入っていない（図形として描かれている）ことがあるため */
           if (r.noText || r.filled < 3 || r.record.priceMan == null) {
             ocrPages[r.pageNo] = true;
-            /* 読み直しが終わるまでは掲載させない（空のまま掲載されるのを防ぐ） */
-            r.ocrPending = true;
           }
+          /* 資料画像ができて読み直しが終わるまでは掲載させない。
+             文字データのあるページも、画像ができる前に掲載すると図面の無い物件になる */
+          r.ocrPending = true;
         });
         renderReview();
         var attached = 0, cut = 0, painted = 0, ocred = 0, manual = 0, done = 0;
@@ -3070,7 +3110,10 @@ function handleFiles(fileList) {
               } else {
                 /* 項目の数では元のほうが多くても、物件名と種別は補う */
                 var cur = d.res.record;
-                if (!cur.name && merged.record.name) { cur.name = merged.record.name; changed = true; }
+                if (!cur.name && merged.record.name) {
+                  cur.name = merged.record.name; changed = true;
+                  if (merged.nameGuessed) d.res.nameGuessed = true;
+                }
                 if (cur.type !== 'house' && cur.type !== 'mansion' &&
                     (merged.record.type === 'house' || merged.record.type === 'mansion')) {
                   cur.type = merged.record.type; changed = true;
@@ -3237,10 +3280,32 @@ function mergeOcrResult(res, im, extraWords) {
      そちらはラベル（物件名・名称）の後ろにある値だけを使う */
   rec.name = mergeName(res.record.name, redact(sparse, extraWords).text, rec.type) ||
              (res.record.name ? res.record.name : (pickNameOcr(redact(dense, extraWords).text, true) || null));
+  /* 物件名が読めないとき（飾り文字・写真の上の文字）は、所在地から仮の名前をつける
+     （「西宮市上鳴尾町のマンション」）。確認画面で黄色く示し、正しい名前に直してもらう */
+  if (!rec.name) {
+    var addr = pickAddressOcr(redact(sparse + '\n' + dense, extraWords).text);
+    if (addr) { rec.name = addr + 'の' + (rec.type === 'house' ? '戸建' : 'マンション'); base.nameGuessed = true; }
+  }
   base.pageNo = res.pageNo;
   base.filled = filledCount(rec);
   rec.sourceFile = res.record.sourceFile;
   return base;
+}
+
+/* 文字認識の結果から所在地の「市区町村＋町名」を取り出す（仮の物件名に使う）。
+   「兵庫県西宮市上鳴尾町13-18」→「西宮市上鳴尾町」。周辺施設（「西宮市立鳴尾北小学校」）や
+   崩れた文字は使わない。見つからなければ null。 */
+function pickAddressOcr(t) {
+  var s = zen2han(String(t || '')).replace(/[ \t\u3000]+/g, '');
+  /* 市区の名前の前に読み違いの漢字が付くことがある（「暁制西宮市」）。
+     市区の名前は、行頭・記号の直後か「県」「府」「都」の直後から始まるものだけを使う */
+  var re = /(?:^|[^一-龥]|[県府都]|所在地|所在|住所)([一-龥]{2,3}[市区])([一-龥ぁ-ん]{1,6}?(?:町|丁目|通))(?=[0-9一二三四五六七八九十-])/gm, m;
+  while ((m = re.exec(s))) {
+    var v = m[1] + m[2];
+    if (/市立|区立|町立|学校|店|駅|病院/.test(v)) continue;
+    return v;
+  }
+  return null;
 }
 
 /* 読み直しが終わった（または失敗した）資料の「読み取り中」を外す */
@@ -3254,7 +3319,7 @@ function clearPending(fileName) {
    ユーザー画面に並ぶのを防ぐ。問題が無ければ空文字を返す。 */
 function publishBlockReason(res) {
   var r = res.record || {};
-  if (res.ocrPending) return '文字認識で読み取り中です。終わるまでお待ちください';
+  if (res.ocrPending) return '資料画像の作成・文字認識の途中です。終わるまでお待ちください';
   var miss = [];
   if (r.type !== 'house' && r.type !== 'mansion') miss.push('種別');
   if (!r.name || !String(r.name).trim()) miss.push('物件名');
@@ -3281,7 +3346,9 @@ function renderReview() {
       ['house', 'mansion'].map(function (t) {
         return '<option value="' + t + '"' + (r.type === t ? ' selected' : '') + '>' + TYPE_LABEL[t] + '</option>';
       }).join('') + '</select></div>';
-    rows += '<div class="row"><label>物件名</label><input data-f="name" data-id="' + d.id + '" value="' + esc(r.name || '') + '" placeholder="例）〇〇3丁目の戸建"></div>';
+    rows += '<div class="row"><label>物件名' + (d.res.nameGuessed ? ' <span style="color:var(--warn);font-size:12px">※資料の名前が読めないため所在地から仮につけました</span>' : '') + '</label>' +
+      '<input data-f="name" data-id="' + d.id + '" value="' + esc(r.name || '') + '" placeholder="例）〇〇3丁目の戸建"' +
+      (d.res.ocr && r.name ? ' style="background:#fff8e1" title="文字認識で読み取った値です。資料画像と照合してください"' : '') + '></div>';
     req.forEach(function (k) {
       var v = r[k];
       var miss = (v === null || v === undefined || v === '');
@@ -3317,7 +3384,7 @@ function renderReview() {
               : '') +
           '<span class="spacer" style="flex:1"></span>' +
           (d.res.ocrPending
-            ? '<button class="btn primary sm" disabled title="文字認識で読み取り中">読み取り中…</button>'
+            ? '<button class="btn primary sm" disabled title="資料画像の作成・文字認識の途中です">読み取り中…</button>'
             : '<button class="btn primary sm" data-act="publish" data-id="' + d.id + '">ユーザー画面に掲載</button>') +
           '<button class="btn sm danger" data-act="discard" data-id="' + d.id + '">破棄</button>' +
         '</div>' +
@@ -3615,6 +3682,7 @@ document.getElementById('btnSaveNg').addEventListener('click', function () {
    ================================================================= */
 function refresh() {
   return Store.list().then(function (a) {
+    if (a === null) return;   /* 一覧を取れなかった：前回の表示を残す */
     items = (a || []).slice();
     renderPublic();
     if (!document.getElementById('view-admin').hidden) { renderAdminList(); setModeBadge(); }
@@ -3668,7 +3736,16 @@ window.__RE = {
   mergeName: mergeName, pickName: pickName, normalizeOcr: normalizeOcr, findBandByGaps: findBandByGaps,
   geoPrice: geoPrice, ocrLinePrice: ocrLinePrice, RENTAL_RE: RENTAL_RE, publishBlockReason: publishBlockReason,
   mergeOcrResult: mergeOcrResult, voteOcrPrice: voteOcrPrice, pickNameOcr: pickNameOcr, Ocr: Ocr,
-  pickPriceByText: pickPriceByText, tightenText: tightenText,
+  pickPriceByText: pickPriceByText, tightenText: tightenText, pickAddressOcr: pickAddressOcr, Store: Store,
+  /* 検証用：確認待ちの物件の状態（掲載できない理由・保存する大きさ） */
+  __drafts: function () {
+    return drafts.map(function (d) {
+      var r = d.res.record;
+      return { page: d.res.pageNo, name: r.name, type: r.type, price: r.priceMan,
+               image: !!r.sheetImage, why: publishBlockReason(d.res),
+               bytes: new Blob([JSON.stringify(r)]).size };
+    });
+  },
   priceLabel: priceLabel, applyMode: applyMode, encodeWithinBudget: encodeWithinBudget, SHEET_BUDGET: SHEET_BUDGET, CONFIG: CONFIG
 };
 </script>

@@ -500,6 +500,11 @@ const sc = await p.evaluate(() => {
     txt2: R.pickPriceByText([13390], 'コスモハイツ 3,390万円'),
     txt3: R.pickPriceByText([4480], '(斜体の価格は日本語の辞書では読めない)'),
     area: ocrRes('専有面積 51.30㎡ (15.5坪) 中古マンション 価格', '中古マンション 価用部分面積151.30㎡ (15.5坪)', null).record.ownArea,
+    addr1: R.pickAddressOcr('@所在地ノ兵庫県西宮市上鳴尾町13-18'),
+    addr2: R.pickAddressOcr('暁制西宮市荒戌町4-17'),
+    addr3: R.pickAddressOcr('西宮市立鳴尾北小学校550m\n所在地西宮市荒戎町4-17'),
+    guess: ocrRes('中古マンション 専有面積 75.01㎡', '中古マンション\n所在地 兵庫県西宮市上鳴尾町13-18\n3,880万円', null),
+    lion: R.pickPriceByText([1165, 5480], '敷地面積:1,165㎡ (約352.41坪)'),
     blockEmpty: R.publishBlockReason({ record: { type: 'unknown', name: '', priceMan: null } }),
     blockPending: R.publishBlockReason({ ocrPending: true, record: { type: 'mansion', name: 'A', priceMan: 1000 } }),
     blockOk: R.publishBlockReason({ record: { type: 'mansion', name: 'サンクレイドル西宮北口', priceMan: 4780 } }),
@@ -522,8 +527,13 @@ ok('月額費用（14,715円）より「万円」付きの価格（3,799万円�
 ok('頭に「1」が付いた読み違い（13,390）を紙面の「3,390万円」で直す', sc.txt2 === 3390, String(sc.txt2));
 ok('紙面の文字で確かめられなくても数字の辞書の値を使う', sc.txt3 === 4480, String(sc.txt3));
 ok('面積が食い違うときは坪数と合うほう（51.30㎡）を採る', sc.area === 51.3, String(sc.area));
+ok('所在地から市区と町名を取り出す', sc.addr1 === '西宮市上鳴尾町', String(sc.addr1));
+ok('前に読み違いの漢字が付いた所在地は使わない', sc.addr2 === null, String(sc.addr2));
+ok('小学校名ではなく所在地を使う', sc.addr3 === '西宮市荒戎町', String(sc.addr3));
+ok('物件名が読めないときは所在地から仮の名前をつけ、仮であることを記録する', sc.guess.record.name === '西宮市上鳴尾町のマンション' && sc.guess.nameGuessed === true, String(sc.guess.record.name));
+ok('面積（1,165㎡）を価格にしない', sc.lion === 5480, String(sc.lion));
 ok('種別・物件名・価格が空の物件は掲載させない', /種別/.test(sc.blockEmpty) && /物件名/.test(sc.blockEmpty) && /価格/.test(sc.blockEmpty), sc.blockEmpty);
-ok('文字認識の途中は掲載させない', /読み取り中/.test(sc.blockPending), sc.blockPending);
+ok("文字認識・資料画像の作成の途中は掲載させない", /途中/.test(sc.blockPending), sc.blockPending);
 ok('必要な項目がそろえば掲載できる', sc.blockOk === '', JSON.stringify(sc.blockOk));
 
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);

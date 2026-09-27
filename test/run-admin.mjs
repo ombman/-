@@ -30,6 +30,8 @@ await p.click('#btnLogin'); await p.waitForSelector('#adminBody:not([hidden])');
 /* 5件を掲載しておく */
 await p.setInputFiles('#fileInput',[path.join(FIX,'bukken_list.pdf')]);
 await p.waitForFunction(()=>document.querySelectorAll('#reviewArea .review').length>=5,{timeout:40000});
+/* 資料画像ができるまでは掲載できない（図面の無い物件を出さないため） */
+await p.waitForFunction(()=>document.getElementById('dropLog').textContent.includes('作成しました'),{timeout:300000});
 await p.click('#btnPublishAll');
 await p.waitForFunction(()=>document.querySelectorAll('#admRows tr [data-del]').length>=5,{timeout:20000});
 const total = (await p.$$('#admRows tr [data-del]')).length;

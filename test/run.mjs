@@ -212,6 +212,9 @@ const rawShown = await admin.$$eval('#reviewArea .raw pre', e => e.map(x => x.te
 ok('④ 確認用テキストにも情報元が残っていない', !/株式会社|有限会社|03-1234|0120|@/.test(rawShown));
 
 /* 掲載 */
+/* 資料画像ができるまでは掲載できない（図面の無い物件を出さないため）。
+   2ファイルとも「作成しました」になるまで待つ */
+await admin.waitForFunction(() => (document.getElementById('dropLog').textContent.match(/作成しました/g) || []).length >= 2, { timeout: 120000 });
 /* 掲載するたびに確認欄が再描画されるため、毎回引き直す */
 for (let i = 0; i < 5; i++) {
   const b = await admin.$('#reviewArea [data-act="publish"]');
