@@ -505,6 +505,20 @@ const sc = await p.evaluate(() => {
     addr3: R.pickAddressOcr('西宮市立鳴尾北小学校550m\n所在地西宮市荒戎町4-17'),
     guess: ocrRes('中古マンション 専有面積 75.01㎡', '中古マンション\n所在地 兵庫県西宮市上鳴尾町13-18\n3,880万円', null),
     lion: R.pickPriceByText([1165, 5480], '敷地面積:1,165㎡ (約352.41坪)'),
+    walk1: R.pickWalkDict('@交通ノび阪神本線`鳴尾・武庫川女子大前」駅徒歩\n約4分豆所在地'),
+    walk1n: R.pickWalkDict(R.normalizeOcr('@交通ノび阪神本線`鳴尾・武庫川女子大前」駅徒歩\n約4分豆所在地')),
+    walk2: R.pickWalkDict('JR称戸w甲子園口w徒歩8分'),
+    walk3: R.pickWalkDict('阪急神戸線`西宮北口」駅徒歩9分'),
+    walk4: R.pickWalkDict('JR神戸ゃ甲子園口w徒歩8分'),
+    walk5: R.pickWalkDict('JR神戸 線 甲子園口 駅 徒歩8分'),
+    st4: R.matchStation('阪神香枦園駅'),
+    st5: R.pickStationDict('@交通ノ/阪神本線`鳴尾・武庫川女子大前」駅徒歩\nG Estt 6.0帖謀約4分'),
+    age3: R.extract(R.normalizeOcr('中古マンション\n築年月\n\n93戸\n(約8.1帖)\n昭和48年11月'), []).record.ageYears,
+    badName: R.pickNameOcr('コスてハイツ日子索尾ッニーューマー中古マンション\nエとンンション貸マンション'),
+    st1: R.matchStation('EふO夙川駅'), st2: R.matchStation('aaa護R護団駅'), st3: R.matchStation('武庫川女子大前駅'),
+    garbled: ocrRes('中古マンション 専有面積 75.01㎡', '中古マンション\n交通 aaa護R護団駅徒歩1分\n3,880万円', null).record,
+    age1: R.extract(R.normalizeOcr('中古マンション 笠年月昭和48年11月 専有面積80.2㎡'), []).record.ageYears,
+    age2: R.extract(R.normalizeOcr('中古マンション 肇年月1 9 9 8 (平成1 0 )年3月'), []).record.ageYears,
     blockEmpty: R.publishBlockReason({ record: { type: 'unknown', name: '', priceMan: null } }),
     blockPending: R.publishBlockReason({ ocrPending: true, record: { type: 'mansion', name: 'A', priceMan: 1000 } }),
     blockOk: R.publishBlockReason({ record: { type: 'mansion', name: 'サンクレイドル西宮北口', priceMan: 4780 } }),
@@ -532,6 +546,23 @@ ok('前に読み違いの漢字が付いた所在地は使わない', sc.addr2 =
 ok('小学校名ではなく所在地を使う', sc.addr3 === '西宮市荒戎町', String(sc.addr3));
 ok('物件名が読めないときは所在地から仮の名前をつけ、仮であることを記録する', sc.guess.record.name === '西宮市上鳴尾町のマンション' && sc.guess.nameGuessed === true, String(sc.guess.record.name));
 ok('面積（1,165㎡）を価格にしない', sc.lion === 5480, String(sc.lion));
+const nowY = new Date().getFullYear(), nowM = new Date().getMonth() + 1;
+const ageOf = (y, m) => nowY - y - (nowM < m ? 1 : 0);
+ok('「交通」欄の「…駅徒歩」「約4分」が2行に分かれても読む', sc.walk1n && sc.walk1n.station === '鳴尾・武庫川女子大前駅' && sc.walk1n.minutes === 4, JSON.stringify(sc.walk1n));
+ok('表の枠で離れた「甲子園口 駅 徒歩8分」を読む', sc.walk2 && sc.walk2.station === '甲子園口駅' && sc.walk2.minutes === 8, JSON.stringify(sc.walk2));
+ok('路線名（神戸線）を駅名と取り違えない', sc.walk3 && sc.walk3.station === '西宮北口駅', JSON.stringify(sc.walk3));
+ok('路線名の読み違い（神戸ゃ）より「徒歩」に近い駅名を採る', sc.walk4 && sc.walk4.station === '甲子園口駅', JSON.stringify(sc.walk4));
+ok('「JR神戸 線 甲子園口 駅 徒歩8分」を甲子園口駅にする', sc.walk5 && sc.walk5.station === '甲子園口駅', JSON.stringify(sc.walk5));
+ok('分数が離れていても「交通」欄の駅名を読む', sc.st5 === '鳴尾・武庫川女子大前駅', String(sc.st5));
+ok('「香枦園」の表記も香櫨園駅にそろえる', sc.st4 === '香櫨園駅', String(sc.st4));
+ok('「築年月」の見出しと値が離れていても築年数を計算する', sc.age3 === ageOf(1973, 11), String(sc.age3));
+ok('カタカナの間にひらがなが挟まる化けた名前は使わない', sc.badName === null, String(sc.badName));
+ok('化けた駅名「EふO夙川駅」を「夙川駅」に直す', sc.st1 === '夙川駅', String(sc.st1));
+ok('一覧に無い化けた駅名は駅名として使わない', sc.st2 === null, String(sc.st2));
+ok('「武庫川女子大前」を正式な駅名に直す', sc.st3 === '鳴尾・武庫川女子大前駅', String(sc.st3));
+ok('化けた駅名（aaa護R護団駅）はユーザー画面に載せない', sc.garbled.station == null, String(sc.garbled.station) + '/' + sc.garbled.walkMin);
+ok('「築年月 昭和48年11月」から築年数を計算する（読み違いの「笠年月」も）', sc.age1 === ageOf(1973, 11), String(sc.age1));
+ok('「築年月 1998（平成10）年3月」から築年数を計算する（数字が離れていても）', sc.age2 === ageOf(1998, 3), String(sc.age2));
 ok('種別・物件名・価格が空の物件は掲載させない', /種別/.test(sc.blockEmpty) && /物件名/.test(sc.blockEmpty) && /価格/.test(sc.blockEmpty), sc.blockEmpty);
 ok("文字認識・資料画像の作成の途中は掲載させない", /途中/.test(sc.blockPending), sc.blockPending);
 ok('必要な項目がそろえば掲載できる', sc.blockOk === '', JSON.stringify(sc.blockOk));

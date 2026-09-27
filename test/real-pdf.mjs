@@ -67,7 +67,7 @@ const res = await p.evaluate(async (only) => {
       name: rec.name, type: rec.type, priceMan: rec.priceMan, walkMin: rec.walkMin, station: rec.station,
       age: rec.ageYears, built: rec.builtLabel, ownArea: rec.ownArea, floorArea: rec.floorArea, share: rec.share,
       masked: im.masked, croppedPx: im.croppedPx, overPaint: im.overPaint,
-      rawText: (secs[r.pageNo-1]||'').slice(0, 1500), ocrText: (im.ocrText||'').slice(0, 3000), ocrSparse: (im.ocrSparse||'').slice(0, 3000),
+      rawText: (secs[r.pageNo-1]||'').slice(0, 1500), ocrText: (im.ocrText||'').slice(0, 3000), ocrSparse: (im.ocrSparse||'').slice(0, 3000), ocrExtra: (im.ocrExtra||'').slice(0, 4000),
       orig: cv.toDataURL('image/jpeg', 0.7), outImg: im.dataUrl || null
     });
   }

@@ -931,6 +931,8 @@ function pickAge(t) {
      備考欄の「平成19年4月24日付けで…」のような無関係な年月を拾わないため。
      「建設年月」「竣工年月」も築年月と同義として受け付ける。 */
   var pats = [
+    /* 「築年月 1998（平成10）年3月」のように西暦と月の間に和暦が挟まる書き方 */
+    /(?:築年月|建設年月|竣工年月|築年)[^0-9]{0,10}((?:19|20)[0-9]{2})\s*[(（][^)）]{0,12}[)）]\s*年?\s*([0-9]{1,2})\s*月/,
     /((?:19|20)[0-9]{2})[^0-9]{0,10}?(?:([0-9]{1,2})\s*月)?[^0-9]{0,6}(?:築|建築|竣工)/,
     /(?:築年月|建設年月|竣工年月)[^0-9]{0,10}((?:19|20)[0-9]{2})[^0-9]{0,6}(?:([0-9]{1,2})\s*月?)?/,
     /築[^0-9]{0,6}((?:19|20)[0-9]{2})[^0-9]{0,6}(?:([0-9]{1,2})\s*月)?/
@@ -953,6 +955,18 @@ function pickAge(t) {
     var y = m[2] === '元' ? 1 : num(m[2]);
     var r2 = ageFromYM(ERA[m[1]] + y, m[3] ? num(m[3]) : null);
     if (r2) return r2;
+  }
+
+  /* 表の枠の中では「築年月」の見出しと値が離れて読まれることがある。
+     「築年月」の見出しがあり、年月の書かれた和暦が1つだけなら、それを築年月とみなす */
+  if (/築年月|築年/.test(s)) {
+    var eras = s.match(/(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*([0-9]{1,2})\s*月/g) || [];
+    var uniq = eras.filter(function (x, i) { return eras.indexOf(x) === i; });
+    if (uniq.length === 1) {
+      var em = uniq[0].match(/(令和|平成|昭和)\s*([0-9]{1,2}|元)\s*年\s*([0-9]{1,2})\s*月/);
+      var r6 = ageFromYM(ERA[em[1]] + (em[2] === '元' ? 1 : num(em[2])), num(em[3]));
+      if (r6) return r6;
+    }
   }
 
   if (/新築|未入居/.test(s)) return { years: 0, built: null };
@@ -994,7 +1008,7 @@ function pickAge(t) {
 var SQM_RE = /(?:([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?)[ \t]*(?:\u33a1|m2|m\u00b2|mr|rrf|nf|\u5e73\u7c73|\u5e73\u65b9\u30e1\u30fc\u30c8\u30eb)|(?:\u33a1|m2|m\u00b2|mr|rrf|nf|\u5e73\u7c73|\u5e73\u65b9\u30e1\u30fc\u30c8\u30eb)[ \t\n]*([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]+)?))/g;
 /* 専有面積として採用しない文脈 */
 /* 「バルコニー」の長音は文字の正規化で「-」に変わるため「バルコニ」で判定する */
-var AREA_NG = /敷地|土地|バルコニ|ベランダ|テラス|専用庭|ルーフ|トランク|総面積|坪|delivered/;
+var AREA_NG = /敷地|土地|バルコ|ポーチ|ベランダ|テラス|専用庭|ルーフ|トランク|総面積|坪|delivered/;
 
 function areaCandidates(t) {
   var s = zen2han(tighten(t));
@@ -1134,6 +1148,9 @@ function looksBrokenName(v) {
   if (/[！!？?◎○●◆◇♦★☆※～〜♪]|です|ます|でした/.test(s)) return true;
   /* 「メゾン-ド」のように区切りの後ろが1文字で終わるのは途中で切れた名前 */
   if (/[・\-－][\u30a1-\u30fc]$/.test(s)) return true;
+  /* カタカナの間に1文字だけひらがなが挟まるのは読み違い（「コスてハイツ」「エとンンション」）。
+     「の」は「〇〇の森」のように名前に使われるので除く */
+  if (/[ァ-ヶー][ぁ-ねは-ゖ][ァ-ヶ一-龥]/.test(s) || /ンン|ーーー/.test(s)) return true;
   /* 「テラス無」「専用庭有」は設備欄の値で、名前ではない */
   if (/(?:無|有|なし|あり)$/.test(s)) return true;
   /* 「マンション」が2回出てくるのは名前ではなく説明 */
@@ -1158,7 +1175,7 @@ function pickName(t, type, strict) {
      スキャン資料では同じラベルが複数あったり値が崩れたりするため、
      候補をすべて集め、名前として成り立つものだけから選ぶ。
      ラベルと値が別の行に分かれている表組みもあるので、次の行も候補にする。 */
-  var re = /(?:建物名称|建物名|マンション名|物件名称|物件名|名称)[\s\u3000]*[:：／/・]?[\s\u3000]*([^\n\r]{2,40})?(?:\r?\n[\s\u3000]*([^\n\r]{2,40}))?/g;
+  var re = /(?:建物名称|建物名|マンション名|物件名称|物件名|名称)[\s\u3000]*[:：／/・|｜]?[\s\u3000]*([^\n\r]{2,40})?(?:\r?\n[\s\u3000]*([^\n\r]{2,40}))?/g;
   var m, cands = [];
   while ((m = re.exec(s))) {
     var ok = function (raw) {
@@ -1380,7 +1397,8 @@ function extract(rawText, extraWords) {
     name: pickName(t, type),
     priceMan: pickPrice(t),
     walkMin: walk ? walk.minutes : null,
-    station: walk ? walk.station : null,
+    /* 駅名の一覧にある駅なら、その表記にそろえる（「JR西宮駅」→「西宮駅」） */
+    station: walk ? (matchStation(walk.station) || walk.station) : null,
     ageYears: age ? age.years : null,
     builtLabel: age ? age.built : null,
     sourceText: t,     /* 管理者の確認用。ユーザー画面には出さない */
@@ -1720,6 +1738,43 @@ function tightenText(canvas, x, y, w, h) {
   var sx = Math.max(0, main.s - pad), ex = Math.min(w, main.e + pad);
   var sy = Math.max(0, best.s - pad), ey = Math.min(h, best.e + pad);
   return { c: c, x: sx, y: sy, w: ex - sx, h: ey - sy, gh: gh };
+}
+
+/* 表の罫線（縦横に長く続く線）を白く消した画像を返す。文字の線は短いので残る。
+   元の画像は変えない。 */
+function removeRules(src) {
+  var W = src.width, H = src.height;
+  if (W < 50 || H < 50) return null;
+  var c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  var cx = c.getContext('2d');
+  cx.drawImage(src, 0, 0);
+  var img;
+  try { img = cx.getImageData(0, 0, W, H); } catch (e) { return null; }
+  var a = img.data, n = W * H, i, x, y, run;
+  var dark = new Uint8Array(n), kill = new Uint8Array(n);
+  for (i = 0; i < n; i++) dark[i] = (a[i * 4] * 0.299 + a[i * 4 + 1] * 0.587 + a[i * 4 + 2] * 0.114) < 150 ? 1 : 0;
+  /* 横 2800px の紙面で70px（紙面の幅の2.5%）以上続く線を罫線とみなす（実物の図面で確認） */
+  var minLen = Math.max(40, Math.round(W * 0.025));
+  for (y = 0; y < H; y++) {
+    run = 0;
+    for (x = 0; x <= W; x++) {
+      if (x < W && dark[y * W + x]) { run++; continue; }
+      if (run >= minLen) for (var k = x - run; k < x; k++) kill[y * W + k] = 1;
+      run = 0;
+    }
+  }
+  for (x = 0; x < W; x++) {
+    run = 0;
+    for (y = 0; y <= H; y++) {
+      if (y < H && dark[y * W + x]) { run++; continue; }
+      if (run >= minLen) for (var k2 = y - run; k2 < y; k2++) kill[k2 * W + x] = 1;
+      run = 0;
+    }
+  }
+  for (i = 0; i < n; i++) if (kill[i]) { a[i * 4] = a[i * 4 + 1] = a[i * 4 + 2] = 255; }
+  cx.putImageData(img, 0, 0);
+  return c;
 }
 
 function ocrPriceDigits(canvas, lines, texts) {
@@ -2165,7 +2220,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
     .then(function () { return page.getTextContent(); })
     .then(function (content) {
       var H = canvas.height, W = canvas.width;
-      var ocrText = null, ocrPrice = null, ocrSparse = null, ocrPriceSure = false;
+      var ocrText = null, ocrPrice = null, ocrSparse = null, ocrPriceSure = false, ocrExtra = null;
 
       /* PDFは1行が複数の断片に分かれることがあり、「TEL：03-」「1234-5678」のように
          切れていると断片単位では検出できない。そこで同じ行の断片をまとめ、
@@ -2228,9 +2283,29 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
                                                          function () { return both; });
           })
           .then(function (both) {
+            /* 駅徒歩・築年・面積・物件名のどれかが読めていなければ、表の罫線を消した画像で
+               もう一度読む。表の枠の中の小さな文字は、罫線と重なって読めないことが多い
+               （「JR神戸線 甲子園口 駅 徒歩8分」「築年月 昭和48年11月」など） */
+            var t2 = normalizeOcr((both.o.text || '') + '\n' + (both.sp ? both.sp.text : ''));
+            var q = extract(t2, extraWords).record;
+            var lacking = q.walkMin == null || q.ageYears == null ||
+              (q.ownArea == null && q.floorArea == null) || !pickNameOcr(t2) ||
+              (q.station && !matchStation(q.station));
+            if (!lacking) return both;
+            var clean = removeRules(both.small);
+            if (!clean) return both;
+            return Ocr.read(clean, '6').then(function (r6) {
+              return Ocr.read(clean, '11').then(function (r11) {
+                both.extra = (r6.text || '') + '\n' + (r11.text || '');
+                return both;
+              });
+            }).catch(function () { return both; });
+          })
+          .then(function (both) {
             var o = both.o, sp = both.sp;
             ocrText = o.text;
             ocrSparse = sp ? sp.text : null;
+            ocrExtra = both.extra || null;
             /* 数字専用の辞書で読めた価格を最優先する。読めなかったときだけ、
                日本語の辞書で読んだ大きな字の価格から投票で選ぶ */
             ocrPriceSure = both.digits != null;
@@ -2487,6 +2562,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         }) } : undefined,
         ocrText: ocrText,
         ocrSparse: ocrSparse,   /* 散らばった文字を拾う読み方の結果 */
+        ocrExtra: ocrExtra,     /* 表の罫線を消して読み直した結果（項目が足りないページだけ） */
         ocrPriceSure: ocrPriceSure,   /* 価格を数字専用の辞書で読めた */
         ocrPrice: ocrPrice   /* 文字認識で大きな字として読めた価格（無ければ null） */
       };
@@ -2561,8 +2637,16 @@ function normalizeOcr(t) {
   t = t.replace(/\u5713/g, '\u5712').replace(/甲子[國国]/g, '甲子園').replace(/[田用申]子[園國]/g, '甲子園');
   /* 路線名の「本線」の読み違い（東海道本綺・阪神本縄）と、駅名の読み違い（香檀園駅→香櫨園駅） */
   t = t.replace(/本[綺縄緯]/g, '本線').replace(/香[檀枦炉]園駅/g, '香櫨園駅');
+  /* 「築年月」の「築」の読み違い（笠年月・肇年月・粟年月・雄年月） */
+  t = t.replace(/[笠肇粟雄策菜箕蕪篠簗細](?=年月|年[ノ〆\/／:：])/g, '築');
+  /* 表の枠の中の数字は1文字ずつ離れて読まれる（「1 9 9 8」「6 5 6 . 7 9」）。数字の間の空白を詰める */
+  /* 詰めるのは1桁ずつ離れたものだけ（電話番号「0798 65 3659」の区切りは残し、伏せる判定を崩さない） */
+  t = t.replace(/(?<![0-9])[0-9](?:[ \t][0-9])+(?![0-9])/g, function (m) { return m.replace(/[ \t]/g, ''); })
+       .replace(/([0-9])[ \t]*\.[ \t]*(?=[0-9])/g, '$1.');
+  /* 「…駅徒歩」と「約4分」が2行に分かれて読まれたものをつなぐ */
+  t = t.replace(/徒歩[ \t]*\r?\n[ \t]*(?=約?[ \t]*[0-9]{1,2}[ \t]*分)/g, '徒歩');
   /* 建物名の末尾「ハイツ」の「ツ」が小さい「ッ」になる読み違い */
-  t = t.replace(/ハイッ(?![\u30a1-\u30fc])/g, 'ハイツ');
+  t = t.replace(/ハイッ(?![\u30a1-\u30fc])/g, 'ハイツ').replace(/[バパ]ハイツ/g, 'ハイツ');
   /* 大きな字の「万円」は「ヵ円」「カP」「ぅp」「万有」「万月」のように化けやすい
      （4,780ヵ円 / 3 590カP / 3,999ぅp / 5980万有）。価格の形の数字の直後に限って直す。
      数字の間の空白は次の処理で詰めるので、ここでは空白を含めて数字とみなす。
@@ -3232,7 +3316,8 @@ var OCR_FILL_KEYS = ['walkMin', 'station', 'ageYears', 'builtLabel', 'floorArea'
 function mergeOcrResult(res, im, extraWords) {
   var raw = res.rawText || '';
   var dense = im.ocrText || '', sparse = im.ocrSparse || '';
-  var allOcr = sparse + '\n' + dense;
+  var extra = im.ocrExtra || '';
+  var allOcr = sparse + '\n' + dense + (extra ? '\n' + extra : '');
   if (allOcr.replace(/\s/g, '').length < 8) return null;
   var eS = sparse.replace(/\s/g, '').length >= 8 ? extract(raw + '\n' + sparse, extraWords) : null;
   var eD = dense.replace(/\s/g, '').length >= 8 ? extract(raw + '\n' + dense, extraWords) : null;
@@ -3245,6 +3330,13 @@ function mergeOcrResult(res, im, extraWords) {
     OCR_FILL_KEYS.forEach(function (k) {
       if (rec[k] == null && other.record[k] != null) rec[k] = other.record[k];
     });
+    /* 罫線を消して読み直した結果で、まだ欠けている項目を補う */
+    if (extra.replace(/\s/g, '').length >= 8) {
+      var eX = extract(raw + '\n' + extra, extraWords).record;
+      OCR_FILL_KEYS.forEach(function (k) {
+        if (rec[k] == null && eX[k] != null) rec[k] = eX[k];
+      });
+    }
     /* 駅名が欠けて読めたほう（「夙川駅」）より、欠けていないほう（「さくら夙川駅」）を採る */
     var os = other.record.station, bs = rec.station;
     if (os && bs && os !== bs && other.record.walkMin === rec.walkMin &&
@@ -3263,6 +3355,21 @@ function mergeOcrResult(res, im, extraWords) {
       if (!fit(a) && fit(b)) rec[k] = b;
     });
   }
+  /* 駅名を駅名の一覧と照らし合わせる。文字化けした駅名（「aaa護R護回駅」）はそのまま載せず、
+     一覧の駅名の直後にある「徒歩◯分」から読み直す。それも無ければ駅徒歩は手入力にまわす */
+  var dictWalk = pickWalkDict(raw + '\n' + allOcr);
+  var okSt = rec.station ? matchStation(rec.station) : null;
+  if (okSt) {
+    rec.station = okSt;
+    if (rec.walkMin == null && dictWalk && dictWalk.station === okSt) rec.walkMin = dictWalk.minutes;
+  } else if (dictWalk) {
+    rec.station = dictWalk.station; rec.walkMin = dictWalk.minutes;
+  } else if (rec.walkMin != null && pickStationDict(raw + '\n' + allOcr)) {
+    /* 分数は読めているが、駅名の後ろの「約4分」が別の行に離れて結び付かなかった */
+    rec.station = pickStationDict(raw + '\n' + allOcr);
+  } else if (rec.station && !/^[一-龥ぁ-んァ-ヶー・]{1,10}駅?$/.test(rec.station)) {
+    rec.station = null; rec.walkMin = null;
+  }
   /* 種別に合わない面積は持たない（マンションに延床面積は無い） */
   if (rec.type === 'mansion') rec.floorArea = null;
   if (rec.type === 'house') { rec.ownArea = null; rec.share = null; }
@@ -3279,7 +3386,8 @@ function mergeOcrResult(res, im, extraWords) {
      隣の欄と混ざって「コスモハイツ甲子園口防1ュ-中古マンション」のようになりやすいため、
      そちらはラベル（物件名・名称）の後ろにある値だけを使う */
   rec.name = mergeName(res.record.name, redact(sparse, extraWords).text, rec.type) ||
-             (res.record.name ? res.record.name : (pickNameOcr(redact(dense, extraWords).text, true) || null));
+             (res.record.name ? res.record.name : (pickNameOcr(redact(dense, extraWords).text, true) ||
+               (extra ? pickName(normalizeOcr(redact(extra, extraWords).text), rec.type, true) : null) || null));
   /* 物件名が読めないとき（飾り文字・写真の上の文字）は、所在地から仮の名前をつける
      （「西宮市上鳴尾町のマンション」）。確認画面で黄色く示し、正しい名前に直してもらう */
   if (!rec.name) {
@@ -3308,6 +3416,88 @@ function pickAddressOcr(t) {
   return null;
 }
 
+/* 駅名の一覧（阪神間を中心に、JR・阪急・阪神・大阪/神戸の主要駅）。
+   文字認識の結果は「EふO夙川駅」「aaa護R護回駅」のように駅名の前後が化けることがあるため、
+   一覧にある駅名と照らし合わせて、正しい駅名に直す。長い名前から順に照合する
+   （「西宮北口」を「西宮」、「さくら夙川」を「夙川」と取り違えないため）。 */
+var STATIONS = [
+  /* JR神戸線・宝塚線 */
+  '大阪', '塚本', '尼崎', '立花', '甲子園口', 'さくら夙川', '西宮', '芦屋', '甲南山手', '摂津本山', '住吉',
+  '六甲道', '灘', '三ノ宮', '元町', '神戸', '塚口', '猪名寺', '伊丹', '北伊丹', '川西池田', '中山寺', '宝塚', '西宮名塩',
+  /* 阪急 */
+  '梅田', '大阪梅田', '十三', '神崎川', '園田', '武庫之荘', '西宮北口', '夙川', '芦屋川', '岡本', '御影', '六甲',
+  '王子公園', '春日野道', '神戸三宮', '宝塚南口', '逆瀬川', '小林', '仁川', '甲東園', '門戸厄神', '阪神国道', '今津',
+  '苦楽園口', '甲陽園', '新伊丹', '稲野', '池田', '川西能勢口', '雲雀丘花屋敷', '山本', '中山観音', '売布神社', '清荒神',
+  /* 阪神 */
+  '福島', '野田', '淀川', '姫島', '千船', '杭瀬', '大物', '出屋敷', '尼崎センタープール前', '武庫川',
+  '鳴尾・武庫川女子大前', '甲子園', '久寿川', '香櫨園', '打出', '深江', '青木', '魚崎', '石屋川', '新在家',
+  '大石', '西灘', '岩屋', '東鳴尾', '洲先', '武庫川団地前',
+  /* 大阪・神戸の主な駅 */
+  '新大阪', '西梅田', '東梅田', '北新地', '淀屋橋', '本町', '心斎橋', 'なんば', '難波', '天王寺', '江坂', '千里中央',
+  '三宮', '新神戸', '西宮浜'
+].sort(function (a, b) { return b.length - a.length; });
+/* 「鳴尾-武庫川女子大前」のように中黒が化けても照合できるよう、中黒をゆるく扱う */
+function stationRe(name) {
+  return name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/・/g, '[・\\-－ー.]?');
+}
+/* 駅名の一部だけが読めた・旧駅名のとき（「武庫川女子大前」「鳴尾」→「鳴尾・武庫川女子大前」） */
+var STATION_ALIAS = { '武庫川女子大前': '鳴尾・武庫川女子大前', '鳴尾': '鳴尾・武庫川女子大前',
+                      '香枦園': '香櫨園', '香炉園': '香櫨園', '香檀園': '香櫨園' };
+/* 読み取った駅名を一覧の駅名に直す。一覧に無ければ null */
+function matchStation(v) {
+  var s = String(v || '').replace(/駅$/, '');
+  for (var i = 0; i < STATIONS.length; i++) {
+    if (new RegExp(stationRe(STATIONS[i]) + '$').test(s)) return STATIONS[i] + '駅';
+  }
+  for (var k in STATION_ALIAS) {
+    if (new RegExp(k + '$').test(s)) return STATION_ALIAS[k] + '駅';
+  }
+  return null;
+}
+/* 一覧の駅名の直後にある「徒歩◯分」を探す（表の枠で「甲子園口 駅 徒歩8分」と離れて書かれる形にも対応）。
+   「交通」の欄にあるものを優先し、無ければ最初に見つかったものを使う。 */
+function pickWalkDict(t) {
+  var s = zen2han(String(t || ''));
+  var best = null;
+  STATIONS.forEach(function (st) {
+    /* 駅名の直後が「線」「本線」「電鉄」なら路線名（「神戸線」の「神戸」）なので除く */
+    var re = new RegExp(stationRe(st) + '(?![ \\t]*[線本電])[」』"\'`]?[ \t]*(?:駅)?[^\n0-9]{0,8}?徒歩[ \t]*約?[ \t]*([0-9]{1,2})[ \t]*分', 'g'), m;
+    while ((m = re.exec(s))) {
+      /* 「西宮北口」の中の「西宮」のように、長い駅名の一部として当たったものは使わない */
+      var before = s.slice(Math.max(0, m.index - 12), m.index + m[0].length);
+      if (STATIONS.some(function (o) { return o.length > st.length && o.indexOf(st) >= 0 && new RegExp(stationRe(o)).test(before); })) continue;
+      var min = Number(m[1]);
+      if (!(min >= 1 && min <= 40)) continue;
+      var ctx = s.slice(Math.max(0, m.index - 30), m.index);
+      var score = (/交通|最寄/.test(ctx) ? 2 : 0);
+      /* 「徒歩」の位置。同じ「徒歩◯分」に複数の駅名が当たったとき（「JR神戸ゃ甲子園口w徒歩8分」）は
+         「徒歩」にいちばん近い駅名を採る（手前の「神戸」は路線名） */
+      var walkAt = m.index + m[0].lastIndexOf('徒歩');
+      var cand = { station: st + '駅', minutes: min, pos: m.index, score: score, walkAt: walkAt };
+      if (best && best.walkAt === walkAt) { if (cand.pos > best.pos) best = cand; continue; }
+      if (!best || cand.score > best.score || (cand.score === best.score && cand.pos < best.pos)) best = cand;
+    }
+  });
+  return best;
+}
+
+/* 「交通」欄の「◯◯駅徒歩」の駅名だけを探す（分数が別の行に離れて読めなかったとき用） */
+function pickStationDict(t) {
+  var s = zen2han(String(t || ''));
+  var best = null;
+  STATIONS.forEach(function (st) {
+    var re = new RegExp(stationRe(st) + '(?![ \\t]*[線本電])[」』"\'`]?[ \t]*駅[ \t]*(?:まで)?[ \t]*徒歩', 'g'), m;
+    while ((m = re.exec(s))) {
+      var before = s.slice(Math.max(0, m.index - 12), m.index + m[0].length);
+      if (STATIONS.some(function (o) { return o.length > st.length && o.indexOf(st) >= 0 && new RegExp(stationRe(o)).test(before); })) continue;
+      var ctx = s.slice(Math.max(0, m.index - 30), m.index);
+      var cand = { station: st + '駅', pos: m.index, score: /交通|最寄/.test(ctx) ? 2 : 0 };
+      if (!best || cand.score > best.score || (cand.score === best.score && cand.pos < best.pos)) best = cand;
+    }
+  });
+  return best ? best.station : null;
+}
+
 /* 読み直しが終わった（または失敗した）資料の「読み取り中」を外す */
 function clearPending(fileName) {
   drafts.forEach(function (d) {
@@ -3324,7 +3514,12 @@ function publishBlockReason(res) {
   if (r.type !== 'house' && r.type !== 'mansion') miss.push('種別');
   if (!r.name || !String(r.name).trim()) miss.push('物件名');
   if (r.priceMan == null || r.priceMan === '') miss.push('価格');
-  return miss.length ? miss.join('・') + 'が未入力です' : '';
+  if (miss.length) return miss.join('・') + 'が未入力です';
+  /* 同じ物件（物件名と価格が同じ）がすでに掲載されていれば、二重に掲載しない */
+  var dup = (items || []).some(function (p) {
+    return p.name && String(p.name).trim() === String(r.name).trim() && Number(p.priceMan) === Number(r.priceMan);
+  });
+  return dup ? '同じ物件（' + r.name + '）がすでに掲載されています' : '';
 }
 
 /* --- ③ 抽出結果のレビュー --- */
@@ -3493,6 +3688,8 @@ document.getElementById('reviewArea').addEventListener('click', function (e) {
 /* --- すべて掲載 / すべて破棄 --- */
 function publishOne(d) {
   return Store.save(d.res.record, authToken).then(function () {
+    /* 同じ一括掲載の中で同じ物件を二重に出さないよう、掲載済みの一覧に加えておく */
+    items.push({ name: d.res.record.name, priceMan: d.res.record.priceMan });
     archive.unshift({ name: d.res.record.name || d.res.record.sourceFile,
                       file: d.res.record.sourceFile, page: d.res.pageNo,
                       text: d.res.cleanText, hits: d.res.redaction.hits });
@@ -3737,6 +3934,7 @@ window.__RE = {
   geoPrice: geoPrice, ocrLinePrice: ocrLinePrice, RENTAL_RE: RENTAL_RE, publishBlockReason: publishBlockReason,
   mergeOcrResult: mergeOcrResult, voteOcrPrice: voteOcrPrice, pickNameOcr: pickNameOcr, Ocr: Ocr,
   pickPriceByText: pickPriceByText, tightenText: tightenText, pickAddressOcr: pickAddressOcr, Store: Store,
+  pickWalkDict: pickWalkDict, matchStation: matchStation, removeRules: removeRules, pickStationDict: pickStationDict,
   /* 検証用：確認待ちの物件の状態（掲載できない理由・保存する大きさ） */
   __drafts: function () {
     return drafts.map(function (d) {
