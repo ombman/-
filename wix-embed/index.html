@@ -1100,7 +1100,9 @@ var NAME_NG = new RegExp([
   /* 設備欄の見出し（「バルコニー／テラス 12.50㎡」など） */
   'バルコニ', '専用庭', 'ポーチ',
   /* 仲介店舗の名前（「西宮マンションプラザ」「お客様の…をお手伝い」） */
-  'プラザ', 'お手伝い', 'お客様'
+  'プラザ', 'お手伝い', 'お客様',
+  /* 業者の事務所の住所（「【大阪支店】…グランフロント大阪タワーC16階」） */
+  '支店', '本店', '支社', '〒', '[0-9]+\\s*階', '[A-Z][0-9]'
 ].join('|'));
 var NAME_HINT = /マンション|ハイツ|テラス|コート|レジデンス|ハウス|ヒルズ|パーク|タワー|ガーデン|プラウド|ワコーレ|グラン|シティ|ヴィラ|メゾン|パレス|ステージ|ビュー/;
 
@@ -1248,7 +1250,9 @@ function okOcrName(raw) {
   /* 「=ジオ甲子園口ノーヴ=」のような飾り記号で囲まれた名前は中身だけを見る */
   var parts = String(raw || '').split(/[=＝]/).filter(function (x) { return x.trim(); });
   if (parts.length > 1) raw = parts.reduce(function (a, b) { return b.length > a.length ? b : a; });
-  raw = String(raw || '').replace(/^[\]\[|｜」』〕）)_\-ー・:：.,、。'`"]+/, '');
+  raw = String(raw || '').replace(/^[\]\[|｜」』〕）)_\-ー・:：.,、。'`"]+/, '')
+    /* 「西宮」の「宮」は形の似た字に読み違えやすい（西害・西容・西宝） */
+    .replace(/西[害容宝寄官]/g, '西宮');
   var v = trimName(raw);
   /* 行頭に付いた読み違いの1〜2文字を落とす（「ニジオ甲子園口ノーヴ」→「ジオ甲子園口ノーヴ」） */
   var bi = v.search(OCR_NAME_BRAND);
@@ -1266,6 +1270,13 @@ function okOcrName(raw) {
 }
 function pickNameOcr(s, labelOnly) {
   var lines = String(s || '').split(/\r?\n/).map(function (l) { return l.trim(); });
+  /* 0) 「グレイス西宮 602号室」のように部屋番号が付いた見出しは、その前が建物名 */
+  for (var r = 0; r < lines.length; r++) {
+    var rm = lines[r].replace(/\s+/g, '').match(/^(.{3,24}?)[0-9]{2,4}号室$/);
+    if (!rm) continue;
+    var rv = okOcrName(rm[1]);
+    if (rv) return rv;
+  }
   /* 1) ラベルの後ろ数行 */
   for (var i = 0; i < lines.length; i++) {
     if (!/(?:物件名|名称|建物名)$/.test(lines[i])) continue;
@@ -1956,6 +1967,19 @@ function readByLabels(canvas, lines, want) {
   if (want.name) tryRegions(labelBoxes(lines, LABEL_NAME).slice(0, 2), function (b) {
     return readNameAt(canvas, b).then(function (r) { if (r) res.nameVotes = r.n; return r ? r.v : null; });
   }, 'name');
+  /* 「グレイス西宮 602号室」のように、物件名の見出しが無く部屋番号だけ読めたときは、その左を読む */
+  if (want.name) {
+    labelBoxes(lines, /^[^0-9]{0,2}[0-9]{2,4}号室$/).slice(0, 2).forEach(function (l) {
+      jobs.push(function () {
+        if (res.name != null) return Promise.resolve();
+        var u = Math.max(l.h, l.w / 4);
+        var box = [Math.max(0, l.x - u * 14), l.y - u * 0.5, l.x, l.y + l.h + u * 0.5];
+        return readNameAt(canvas, box).then(function (r) {
+          if (r) { res.name = r.v; res.nameVotes = r.n; }
+        });
+      });
+    });
+  }
   return jobs.reduce(function (ch, job) { return ch.then(job); }, Promise.resolve()).then(function () { return res; });
 }
 
@@ -2385,8 +2409,10 @@ function encodeWithinBudget(canvas) {
 }
 
 /* 1ページ分を描画し、情報元を消した画像を返す */
-function renderRedactedPage(page, extraWords, scale, forceOcr) {
-  var viewport = page.getViewport({ scale: scale || 1.6 });
+function renderRedactedPage(page, extraWords, scale, forceOcr, turn) {
+  /* turn：紙面の中身が横向きに置かれた資料を正しい向きに直すための追加の回転（度） */
+  var rot = ((page.rotate || 0) + (turn || 0)) % 360;
+  var viewport = page.getViewport({ scale: scale || 1.6, rotation: rot });
   var canvas = document.createElement('canvas');
   canvas.width = Math.floor(viewport.width);
   canvas.height = Math.floor(viewport.height);
@@ -2426,7 +2452,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         var zoom = 2.5;
         if (viewport.width * zoom > 3800) zoom = 3800 / viewport.width;
         if (zoom < 1) zoom = 1;
-        var vp2 = page.getViewport({ scale: viewport.scale * zoom });
+        var vp2 = page.getViewport({ scale: viewport.scale * zoom, rotation: rot });
         var big = document.createElement('canvas');
         big.width = Math.floor(vp2.width); big.height = Math.floor(vp2.height);
         var bcx = big.getContext('2d');
@@ -2767,18 +2793,107 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
 }
 
 /* PDF全体のページ画像をつくる */
+/* ページで使う埋め込みフォントを、ブラウザが実際に読み込めたか。
+   小さく一度描いて（フォントの読み込みを済ませて）から、ブラウザのフォント一覧で
+   読み込み済みになっているかを確かめる。1つでも読み込めていなければ false */
+function fontsLoaded(page) {
+  var vp = page.getViewport({ scale: 0.3 });
+  var c = document.createElement('canvas');
+  c.width = Math.max(1, Math.floor(vp.width)); c.height = Math.max(1, Math.floor(vp.height));
+  return page.render({ canvasContext: c.getContext('2d'), viewport: vp, intent: 'print' }).promise
+    .then(function () { return page.getOperatorList({ intent: 'print' }); })
+    .then(function (ol) {
+      var ids = {};
+      ol.fnArray.forEach(function (fn, k) { if (fn === pdfjsLib.OPS.setFont) ids[ol.argsArray[k][0]] = true; });
+      var faces = [];
+      try { document.fonts.forEach(function (f) { faces.push(f); }); } catch (e) {}
+      return Object.keys(ids).every(function (id) {
+        var f;
+        try { f = page.commonObjs.get(id); } catch (e) { return false; }
+        if (!f || f.missingFile || f.isType3Font || !f.loadedName) return true;
+        return faces.some(function (ff) {
+          return String(ff.family).replace(/["']/g, '') === f.loadedName && ff.status === 'loaded';
+        });
+      });
+    })
+    .catch(function () { return false; });
+}
+
+/* ページで使っているフォントがすべて資料に埋め込まれているか（埋め込まれていれば、
+   文字の形を図形として描ける）。調べられないときは false（従来どおりの描き方にする） */
+function allFontsEmbedded(page) {
+  return page.getOperatorList({ intent: 'print' }).then(function (ol) {
+    var ids = {};
+    ol.fnArray.forEach(function (fn, k) { if (fn === pdfjsLib.OPS.setFont) ids[ol.argsArray[k][0]] = true; });
+    return Object.keys(ids).every(function (id) {
+      try {
+        var f = page.commonObjs.get(id);
+        return f && !f.missingFile;
+      } catch (e) { return false; }
+    });
+  }).catch(function () { return false; });
+}
+
+/* 文字データの無いページで、紙面の中身が横向き（90度回転）に置かれていないかを調べる。
+   文字をすべて図形に変換した資料では、縦長の用紙に横長の図面を横倒しで貼ったものがあり、
+   そのまま読むと文字認識で1文字も読めない（「グレイス西宮」の資料）。
+   縮小した画像を向きを変えて読み、日本語が最も多く読めた向きを返す（0／90／270）。 */
+/* 読めた文字のうち、物件資料に必ず出てくる語の数。横倒しの紙面を読むと
+   「国謬」「清國談縄肉」のような意味のない漢字が大量に出るため、字数ではなく語で数える */
+var TURN_WORDS = /価格|万円|駅|徒歩|専有|面積|所在|交通|管理費|築年|間取|バルコニー|洋室|和室|マンション|現況|引渡|修繕|総戸数|構造/g;
+function jpCount(text) {
+  return (String(text || '').replace(/\s+/g, '').match(TURN_WORDS) || []).length;
+}
+function detectTurn(page) {
+  if (!Ocr.available()) return Promise.resolve(0);
+  return page.getTextContent().then(function (c) {
+    var chars = (c.items || []).reduce(function (a, it) { return a + String(it.str || '').replace(/\s/g, '').length; }, 0);
+    if (chars >= 20) return 0;   /* 文字データがあるページはそのまま */
+    function probe(turn) {
+      var vp0 = page.getViewport({ scale: 1, rotation: ((page.rotate || 0) + turn) % 360 });
+      var k = 1400 / Math.max(vp0.width, vp0.height);
+      var vp = page.getViewport({ scale: k, rotation: ((page.rotate || 0) + turn) % 360 });
+      var cv = document.createElement('canvas');
+      cv.width = Math.floor(vp.width); cv.height = Math.floor(vp.height);
+      var cx = cv.getContext('2d');
+      if ('filter' in cx) cx.filter = 'grayscale(1) contrast(1.35)';
+      return page.render({ canvasContext: cx, viewport: vp, intent: 'print' }).promise
+        .then(function () { return Ocr.read(cv, '11'); })
+        .then(function (r) { return jpCount(r.text); }, function () { return 0; });
+    }
+    return probe(0).then(function (s0) {
+      /* 普通に読めていれば向きはそのまま（ほとんどの資料はここで終わる） */
+      if (s0 >= 4) return 0;
+      return probe(90).then(function (s90) {
+        return probe(270).then(function (s270) {
+          var best = s90 >= s270 ? { t: 90, s: s90 } : { t: 270, s: s270 };
+          return (best.s >= 4 && best.s > s0 * 2) ? best.t : 0;
+        });
+      });
+    });
+  }).catch(function () { return 0; });
+}
+
 function renderRedactedPdf(file, extraWords, opts) {
   if (!window.pdfjsLib) return Promise.resolve([]);
   return file.arrayBuffer()
     .then(function (buf) {
-      return pdfjsLib.getDocument({
-        data: buf,
-        cMapUrl: CONFIG.PDFJS_BASE + 'cmaps/',
-        cMapPacked: true,
-        standardFontDataUrl: CONFIG.PDFJS_BASE + 'standard_fonts/'
-      }).promise;
+      var base = { cMapUrl: CONFIG.PDFJS_BASE + 'cmaps/', cMapPacked: true,
+                   standardFontDataUrl: CONFIG.PDFJS_BASE + 'standard_fonts/' };
+      /* 同じ資料を2通りに開く。
+         ・paths：埋め込みのフォントをブラウザに読み込ませず、文字の形を図形として直接描く。
+           ブラウザによっては埋め込みの日本語フォント（ヒラギノ・小塚ゴシックなど）を
+           読み込めず、日本語だけが消えた資料画像になっていた（数字だけ別のフォントで残る）。
+         ・fonts：従来どおり。フォントが埋め込まれていない資料は文字の形を持たないため、
+           パソコンの日本語フォントで描くしかない。
+         ページごとに、使っているフォントがすべて埋め込まれていれば paths、そうでなければ fonts で描く */
+      return Promise.all([
+        pdfjsLib.getDocument(Object.assign({ data: buf.slice(0), disableFontFace: true }, base)).promise,
+        pdfjsLib.getDocument(Object.assign({ data: buf.slice(0) }, base)).promise
+      ]);
     })
-    .then(function (pdf) {
+    .then(function (docs) {
+      var pdf = docs[0], pdfFonts = docs[1];
       var out = [], i = 1;
       /* onPage：1ページ終わるたびに呼ぶ。スキャン資料は文字認識に
          1ページ数秒かかるため、全ページ待つと数分画面が止まって見える。
@@ -2789,7 +2904,26 @@ function renderRedactedPdf(file, extraWords, opts) {
         var n = i++;
         var force = !!(opts && opts.ocrPages && opts.ocrPages[n]);
         return pdf.getPage(n)
-          .then(function (pg) { return renderRedactedPage(pg, extraWords, null, force); })
+          .then(function (pgPaths) {
+            return pdfFonts.getPage(n).then(function (pgFonts) {
+              return allFontsEmbedded(pgPaths).then(function (embedded) {
+                /* 埋め込まれていないフォントがあるページは、パソコンのフォントで描くしかない */
+                if (!embedded) return pgFonts;
+                /* 従来どおりの描き方で文字が欠けていないかを、小さく描いて確かめる。
+                   欠けていなければ従来どおり（資料画像・帯の判定を変えないため）、
+                   フォントの読み込みに失敗して文字が欠けていれば、図形として描く */
+                return fontsLoaded(pgFonts).then(function (okFonts) {
+                  if (window.__RE_DEBUG) (window.__fontDbg = window.__fontDbg || []).push(okFonts);
+                  return okFonts ? pgFonts : pgPaths;
+                });
+              });
+            });
+          })
+          .then(function (pg) {
+            return detectTurn(pg).then(function (turn) {
+              return renderRedactedPage(pg, extraWords, null, force, turn);
+            });
+          })
           .then(function (img) {
             img.pageNo = n; out.push(img);
             if (onPage) { try { onPage(img, n, pdf.numPages); } catch (e) {} }
@@ -2857,7 +2991,9 @@ function normalizeOcr(t) {
   t = t.replace(/([0-9])[,.]{2,}([0-9])/g, '$1,$2');
   /* 面積の単位「㎡」は「nf」「mi」「ni」などに化けやすい（65.21mi → 65.21㎡）。
      小数2桁の数字の直後に限って直す */
-  t = t.replace(/([0-9]\.[0-9]{2})[ \t]*(?:nf|nT|ni|nI|n1|nl|nr|mi|mf|rf|ri|rn|m2|ｍ2)(?![a-zA-Z])/g, '$1㎡');
+  t = t.replace(/([0-9]\.[0-9]{2})[ \t]*(?:nf|nT|ni|nI|n1|nl|nr|mi|mf|rf|ri|rn|m2|ｍ2)(?![a-zA-Z])/g, '$1㎡')
+       /* 「76.54miezysep」のように単位の後ろに（約23.15坪）が化けて続くものも㎡とみなす */
+       .replace(/([0-9]\.[0-9]{2})[ \t]*(?:mi|ni|nf)(?=[a-z])/g, '$1㎡');
   /* 桁区切りのカンマが小数点に化けたものを戻す（5.880万円 → 5,880万円） */
   t = t.replace(/([0-9])\.([0-9]{3})(?![0-9])/g, '$1,$2');
   /* 社名まわりのよくある化け字 */
@@ -4166,7 +4302,7 @@ window.__RE = {
   mergeOcrResult: mergeOcrResult, voteOcrPrice: voteOcrPrice, pickNameOcr: pickNameOcr, Ocr: Ocr,
   pickPriceByText: pickPriceByText, tightenText: tightenText, pickAddressOcr: pickAddressOcr, Store: Store,
   pickWalkDict: pickWalkDict, matchStation: matchStation, removeRules: removeRules, pickStationDict: pickStationDict,
-  readByLabels: readByLabels, cropForRead: cropForRead, unslant: unslant,
+  readByLabels: readByLabels, cropForRead: cropForRead, unslant: unslant, fontsLoaded: fontsLoaded, allFontsEmbedded: allFontsEmbedded,
   /* 検証用：確認待ちの物件の状態（掲載できない理由・保存する大きさ） */
   __drafts: function () {
     return drafts.map(function (d) {
