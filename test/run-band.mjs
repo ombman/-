@@ -519,6 +519,7 @@ const sc = await p.evaluate(() => {
     garbled: ocrRes('中古マンション 専有面積 75.01㎡', '中古マンション\n交通 aaa護R護団駅徒歩1分\n3,880万円', null).record,
     age1: R.extract(R.normalizeOcr('中古マンション 笠年月昭和48年11月 専有面積80.2㎡'), []).record.ageYears,
     age2: R.extract(R.normalizeOcr('中古マンション 肇年月1 9 9 8 (平成1 0 )年3月'), []).record.ageYears,
+    cellArea: ocrRes('中古マンション\n繰財|80.2w|霜|7-1n\n※上記専有面積にはMB・物入2.56m含まれてい', '中古マンション 3,390万円', null).record.ownArea,
     blockEmpty: R.publishBlockReason({ record: { type: 'unknown', name: '', priceMan: null } }),
     blockPending: R.publishBlockReason({ ocrPending: true, record: { type: 'mansion', name: 'A', priceMan: 1000 } }),
     blockOk: R.publishBlockReason({ record: { type: 'mansion', name: 'サンクレイドル西宮北口', priceMan: 4780 } }),
@@ -563,6 +564,7 @@ ok('「武庫川女子大前」を正式な駅名に直す', sc.st3 === '鳴尾�
 ok('化けた駅名（aaa護R護団駅）はユーザー画面に載せない', sc.garbled.station == null, String(sc.garbled.station) + '/' + sc.garbled.walkMin);
 ok('「築年月 昭和48年11月」から築年数を計算する（読み違いの「笠年月」も）', sc.age1 === ageOf(1973, 11), String(sc.age1));
 ok('「築年月 1998（平成10）年3月」から築年数を計算する（数字が離れていても）', sc.age2 === ageOf(1998, 3), String(sc.age2));
+ok('表の枠の中の「80.2㎡」（単位が化けて見出しも読めない）を専有面積にする', sc.cellArea === 80.2, String(sc.cellArea));
 ok('種別・物件名・価格が空の物件は掲載させない', /種別/.test(sc.blockEmpty) && /物件名/.test(sc.blockEmpty) && /価格/.test(sc.blockEmpty), sc.blockEmpty);
 ok("文字認識・資料画像の作成の途中は掲載させない", /途中/.test(sc.blockPending), sc.blockPending);
 ok('必要な項目がそろえば掲載できる', sc.blockOk === '', JSON.stringify(sc.blockOk));

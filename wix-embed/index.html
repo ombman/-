@@ -1113,7 +1113,7 @@ function trimName(v) {
     /* 漢字の直後のカタカナ「ロ」は漢字の「口」（ジオ甲子園ロノーヴ→ジオ甲子園口ノーヴ） */
     .replace(/([\u4e00-\u9fff])\u30ed/g, '$1\u53e3')
     /* カタカナの間の中黒は「`」「'」に化けやすい（ネオ`ディ→ネオ・ディ） */
-    .replace(/([\u30a1-\u30fc])[`'´‘’.．]([\u30a1-\u30fc])/g, '$1・$2')
+    .replace(/([\u30a1-\u30fc])[`'´‘’.．:：;；]([\u30a1-\u30fc])/g, '$1・$2')
     .replace(/^[◆■▶◇□▷･・\s\u3000]+/, '')
     .replace(/[\s\u3000]*[0-9]{1,4}\s*号\s*室?$/, '')
     .replace(/(?:リノベーション物件|リフォーム済み?|リノベ済み?)$/, '')
@@ -1146,6 +1146,8 @@ function looksBrokenName(v) {
   /* 感嘆符・装飾記号・「です」「ます」はキャッチコピー
      （「周辺環境良好！…アクセス◎」「～テラスと専用庭のある…住戸です～」「♦区分マンション買取強化中♦」） */
   if (/[！!？?◎○●◆◇♦★☆※～〜♪]|です|ます|でした/.test(s)) return true;
+  /* 小さい「ヵ」「ヶ」を含む・「ン」「ー」で始まるのは読み違い（「ヵンカカ」） */
+  if (/[ヵヶ]/.test(s) || /^[ンーッャュョ]/.test(s)) return true;
   /* 「メゾン-ド」のように区切りの後ろが1文字で終わるのは途中で切れた名前 */
   if (/[・\-－][\u30a1-\u30fc]$/.test(s)) return true;
   /* カタカナの間に1文字だけひらがなが挟まるのは読み違い（「コスてハイツ」「エとンンション」）。
@@ -1246,6 +1248,7 @@ function okOcrName(raw) {
   /* 「=ジオ甲子園口ノーヴ=」のような飾り記号で囲まれた名前は中身だけを見る */
   var parts = String(raw || '').split(/[=＝]/).filter(function (x) { return x.trim(); });
   if (parts.length > 1) raw = parts.reduce(function (a, b) { return b.length > a.length ? b : a; });
+  raw = String(raw || '').replace(/^[\]\[|｜」』〕）)_\-ー・:：.,、。'`"]+/, '');
   var v = trimName(raw);
   /* 行頭に付いた読み違いの1〜2文字を落とす（「ニジオ甲子園口ノーヴ」→「ジオ甲子園口ノーヴ」） */
   var bi = v.search(OCR_NAME_BRAND);
@@ -1677,6 +1680,12 @@ function tightenText(canvas, x, y, w, h) {
   var img;
   try { img = cx.getImageData(0, 0, w, h); } catch (e) { return null; }
   var a = img.data, dark = new Uint8Array(w * h), i, r, col;
+  /* 背景が暗い（茶色や紺の帯に白い文字）ときは明暗を反転して、黒い文字・白い背景にする */
+  var sumL = 0;
+  for (i = 0; i < w * h; i++) sumL += a[i * 4] * 0.299 + a[i * 4 + 1] * 0.587 + a[i * 4 + 2] * 0.114;
+  if (sumL / (w * h) < 120) {
+    for (i = 0; i < w * h; i++) { a[i * 4] = 255 - a[i * 4]; a[i * 4 + 1] = 255 - a[i * 4 + 1]; a[i * 4 + 2] = 255 - a[i * 4 + 2]; }
+  }
   for (i = 0; i < w * h; i++) {
     var lum = a[i * 4] * 0.299 + a[i * 4 + 1] * 0.587 + a[i * 4 + 2] * 0.114;
     dark[i] = lum < 140 ? 1 : 0;
@@ -1775,6 +1784,179 @@ function removeRules(src) {
   for (i = 0; i < n; i++) if (kill[i]) { a[i * 4] = a[i * 4 + 1] = a[i * 4 + 2] = 255; }
   cx.putImageData(img, 0, 0);
   return c;
+}
+
+/* 見出し（「物件名」「専有面積」「価格」）のすぐ右・すぐ下を切り出して読み直す。
+   販売図面では、見出しは小さな字、値は大きな飾り文字（斜体・明朝）や表の枠の中にあり、
+   紙面全体を読むと値だけが崩れることが多い（「ノバ・パラッツォ西宮」「80.2㎡」「6,980万円」）。
+   lines は canvas の画素座標の行（文字と位置）。読めたものだけを返す。 */
+var LABEL_NAME = /^[^0-9一-龥]{0,3}(?:物件名|名称|建物名|マンション名)[^0-9一-龥]{0,2}$/;
+var LABEL_AREA = /^[^0-9一-龥]{0,3}(?:専有面積|専有部分面積|占有面積)(?:[(（][^)）]{0,6}[)）])?[^0-9]{0,3}$/;
+var LABEL_FLOOR = /^[^0-9一-龥]{0,3}(?:延床面積|延べ床面積|建物面積)[^0-9]{0,3}$/;
+var LABEL_PRICE = /^[^0-9一-龥]{0,3}(?:販売)?価\s*格[^0-9]{0,4}$/;
+function labelBoxes(lines, re) {
+  return (lines || []).filter(function (l) {
+    var t = String(l.text || '').replace(/\s+/g, '');
+    return t && t.length <= 10 && re.test(t) && l.h > 4;
+  });
+}
+/* 範囲を切り出し、罫線を消して文字の塊だけにしてから、字の高さ target にそろえた画像を返す */
+function cropForRead(canvas, x0, y0, x1, y1, target) {
+  x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+  x1 = Math.min(canvas.width, Math.ceil(x1)); y1 = Math.min(canvas.height, Math.ceil(y1));
+  if (x1 - x0 < 8 || y1 - y0 < 8) return null;
+  var t = tightenText(canvas, x0, y0, x1 - x0, y1 - y0);
+  if (!t) return null;
+  var k = Math.max(0.2, Math.min(4, target / t.gh));
+  var c = document.createElement('canvas');
+  c.width = Math.round(t.w * k) + 40; c.height = Math.round(t.h * k) + 40;
+  var cx = c.getContext('2d');
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height);
+  cx.drawImage(t.c, t.x, t.y, t.w, t.h, 20, 20, c.width - 40, c.height - 40);
+  return c;
+}
+/* 斜体の文字をまっすぐにする（右に傾いた字を左へずらす）。k は傾き（0.2≒11度） */
+function unslant(c, k) {
+  if (!k) return c;
+  var extra = Math.ceil(c.height * k);
+  var d = document.createElement('canvas');
+  d.width = c.width + extra; d.height = c.height;
+  var dx = d.getContext('2d');
+  dx.fillStyle = '#fff'; dx.fillRect(0, 0, d.width, d.height);
+  dx.setTransform(1, 0, k, 1, 0, 0);   /* x' = x + k*y：上ほど右へ傾いた字を戻すため下をずらす */
+  dx.drawImage(c, 0, 0);
+  return d;
+}
+
+/* 数字を3通りの大きさで読んで多数決（re の1つ目の組を数値にする） */
+function readNumberAt(canvas, box, re, toVal) {
+  /* 大きさ3通り（そのまま）と、斜体をまっすぐにしたもの4通りで読み、多数決で決める */
+  var variants = [[0, 36], [0, 60], [0, 90], [0.15, 48], [0.15, 64], [0.25, 48], [0.25, 64]];
+  var reads = [];
+  return variants.reduce(function (chain, v) {
+    return chain.then(function () {
+      var c = cropForRead(canvas, box[0], box[1], box[2], box[3], v[1]);
+      if (!c) return;
+      return Ocr.readDigits(unslant(c, v[0]), '7').then(function (ws) {
+        var t = ws.map(function (w) { return w.text; }).join(' ');
+        if (window.__RE_DEBUG) (window.__labDbg = window.__labDbg || []).push({ k: 'num', v: v, box: box.map(Math.round), t: t });
+        var m = t.match(re);
+        if (m) { var val = toVal(m); if (val != null) reads.push(val); }
+      }, function () {});
+    });
+  }, Promise.resolve()).then(function () {
+    if (!reads.length) return null;
+    /* 「16,980」のように枠の線を「1」と読んだものは、頭の1を除いた値が他にあればそちらに数える */
+    var set = {};
+    reads.forEach(function (x) { set[x] = true; });
+    reads = reads.map(function (x) {
+      var sx = String(x);
+      if (x >= 10000 && sx.charAt(0) === '1' && set[Number(sx.slice(1))]) return Number(sx.slice(1));
+      return x;
+    });
+    var cnt = {};
+    reads.forEach(function (x) { cnt[x] = (cnt[x] || 0) + 1; });
+    var best = reads[0];
+    Object.keys(cnt).forEach(function (k) { if (cnt[k] > cnt[best]) best = Number(k); });
+    /* 読み方によって値が割れるとき（2回以上同じ値にならない）は、確かでないので使わない */
+    if (reads.length >= 3 && cnt[best] < 2) return null;
+    return best;
+  });
+}
+function readNameAt(canvas, box) {
+  /* 3通りの大きさで読み、名前として成り立つものの中で最も多く読めたものを採る */
+  /* 物件名は斜体の飾り文字が多い。そのままのものと、斜体をまっすぐにしたもの（実物の図面で
+     傾き0.15〜0.25のときに「ジェイグラン甲子園口松並町」「リベール夙川公園」が正しく読めた）で読む */
+  var cnt = {};
+  var variants = [[0, 48], [0, 64], [0.15, 48], [0.15, 64], [0.25, 48], [0.25, 64]];
+  return variants.reduce(function (chain, v) {
+    return chain.then(function () {
+      var c = cropForRead(canvas, box[0], box[1], box[2], box[3], v[1]);
+      if (!c) return;
+      return Ocr.read(unslant(c, v[0]), '7').then(function (r) {
+        if (window.__RE_DEBUG) (window.__labDbg = window.__labDbg || []).push({ k: 'name', v: v, box: box.map(Math.round), t: r.text });
+        String(r.text || '').split(/\r?\n/).forEach(function (line) {
+          var v = okOcrName(normalizeOcr(line).replace(/\s+/g, ''));
+          if (v) cnt[v] = (cnt[v] || 0) + 1;
+        });
+      }, function () {});
+    });
+  }, Promise.resolve()).then(function () {
+    var best = null;
+    Object.keys(cnt).forEach(function (k) {
+      if (best == null || cnt[k] > cnt[best] || (cnt[k] === cnt[best] && k.length > best.length)) best = k;
+    });
+    return best ? { v: best, n: cnt[best] } : null;
+  });
+}
+
+function readByLabels(canvas, lines, want) {
+  var W = canvas.width, res = {};
+  var jobs = [];
+  /* 面積は「60.32」のように小数のある数字。前に余計な数字が付いて読まれることがある
+     （「117560.32」「壁芯」の読み違い）ので、小数点の手前は3桁→2桁の順に、範囲に収まるものを採る。
+     複数あれば最後のもの（ラベルから遠い側＝値そのもの）を使う */
+  var areaRe = /[\s\S]*/;
+  var areaVal = function (m) {
+    var t = m[0], re = /([0-9]{1,3})\.([0-9]{1,2})(?![0-9])/g, x, cands = [], raw = [];
+    while ((x = re.exec(t))) {
+      var ip = x[1], dp = x[2];
+      raw.push(Number(ip.slice(-2) + '.' + dp));
+      var v3 = Number(ip.slice(-3) + '.' + dp), v2 = Number(ip.slice(-2) + '.' + dp);
+      var v = (ip.length >= 3 && v3 >= 10 && v3 <= 400) ? v3 : (v2 >= 10 && v2 <= 400 ? v2 : null);
+      if (v != null) cands.push(v);
+    }
+    if (!cands.length) return null;
+    /* 「76.33㎡(23.08坪)」のように坪数が並んでいれば、坪数と合う値を採る */
+    for (var i = 0; i < cands.length; i++) {
+      var c = cands[i];
+      if (raw.some(function (r) { return Math.abs(c * 0.3025 - r) < 0.1; })) return c;
+    }
+    return cands[cands.length - 1];
+  };
+  /* 「6,98071」のように後ろの「万円」が数字に化けて続くことがあるので、後ろは見ない */
+  var priceRe = /(?:^|[^0-9])([0-9]{1,2})[,.]([0-9]{3})/;
+  var priceVal = function (m) { var v = Number(m[1] + m[2]); return v >= 300 && v <= 30000 ? v : null; };
+  /* 見出しの右（同じ行）と下（次の行）の2か所を試す */
+  /* 見出しの字の高さは読み方によって小さめに出ることがあるため、見出しの幅も目安にする。
+     値は見出しより大きな字のことが多いので、上下にも広めに取る（どの行を読むかは
+     tightenText が大きな字の行を選ぶ） */
+  function regions(l, rightW, downW, downH) {
+    var u = Math.max(l.h, l.w / 3);
+    return [
+      [l.x + l.w, l.y - u * 1.2, Math.min(W, l.x + l.w + u * rightW), l.y + l.h + u * 1.2],
+      [l.x - Math.max(u * 2, l.w), l.y + l.h, Math.min(W, l.x + Math.max(u * downW, l.w * 2.8)), l.y + l.h + u * downH]
+    ];
+  }
+  /* 見出しの字の高さだけを目安にした狭い範囲（表の枠の中の値向け。隣の欄を含めない） */
+  function regionsTight(l, rightW, downW, downH) {
+    return [
+      [l.x + l.w, l.y - l.h * 0.6, Math.min(W, l.x + l.w + l.h * rightW), l.y + l.h * 1.6],
+      [l.x - l.h * 2, l.y + l.h, Math.min(W, l.x + l.h * downW), l.y + l.h * (1 + downH)]
+    ];
+  }
+  function tryRegions(list, fn, key) {
+    list.forEach(function (l) {
+      jobs.push(function () {
+        if (res[key] != null) return Promise.resolve();
+        var rs = key === 'name' ? regions(l, 25, 25, 3.5).reverse()
+          : regionsTight(l, key === 'price' ? 15 : 11, 9, 3).concat(regions(l, key === 'price' ? 15 : 11, 9, 3));
+        return rs.reduce(function (ch, box) {
+          return ch.then(function () {
+            if (res[key] != null) return;
+            return fn(box).then(function (v) { if (v != null) res[key] = v; });
+          });
+        }, Promise.resolve());
+      });
+    });
+  }
+  if (want.area) tryRegions(labelBoxes(lines, LABEL_AREA).slice(0, 2), function (b) { return readNumberAt(canvas, b, areaRe, areaVal); }, 'area');
+  if (want.floor) tryRegions(labelBoxes(lines, LABEL_FLOOR).slice(0, 2), function (b) { return readNumberAt(canvas, b, areaRe, areaVal); }, 'floor');
+  if (want.price) tryRegions(labelBoxes(lines, LABEL_PRICE).slice(0, 2), function (b) { return readNumberAt(canvas, b, priceRe, priceVal); }, 'price');
+  if (want.name) tryRegions(labelBoxes(lines, LABEL_NAME).slice(0, 2), function (b) {
+    return readNameAt(canvas, b).then(function (r) { if (r) res.nameVotes = r.n; return r ? r.v : null; });
+  }, 'name');
+  return jobs.reduce(function (ch, job) { return ch.then(job); }, Promise.resolve()).then(function () { return res; });
 }
 
 function ocrPriceDigits(canvas, lines, texts) {
@@ -2220,7 +2402,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
     .then(function () { return page.getTextContent(); })
     .then(function (content) {
       var H = canvas.height, W = canvas.width;
-      var ocrText = null, ocrPrice = null, ocrSparse = null, ocrPriceSure = false, ocrExtra = null;
+      var ocrText = null, ocrPrice = null, ocrSparse = null, ocrPriceSure = false, ocrExtra = null, ocrLabel = null;
 
       /* PDFは1行が複数の断片に分かれることがあり、「TEL：03-」「1234-5678」のように
          切れていると断片単位では検出できない。そこで同じ行の断片をまとめ、
@@ -2297,15 +2479,28 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
             return Ocr.read(clean, '6').then(function (r6) {
               return Ocr.read(clean, '11').then(function (r11) {
                 both.extra = (r6.text || '') + '\n' + (r11.text || '');
+                both.extraLines = (r6.lines || []).concat(r11.lines || []);
                 return both;
               });
             }).catch(function () { return both; });
+          })
+          .then(function (both) {
+            /* 見出しのすぐ右・下を読み直す（物件名・専有面積・価格）。
+               物件名と専有面積は、ほかの読み方で取れていても見出しの値を優先するため毎回読む */
+            var f = both.f;
+            var lines = (both.o.lines || []).map(function (l) {
+              return { text: l.text, x: l.x * f, y: l.y * f, w: l.w * f, h: l.h * f };
+            }).concat(both.sp ? both.sp.lines : []).concat(both.extraLines || []);
+            return readByLabels(both.small, lines, { name: true, area: true, floor: true, price: both.digits == null })
+              .then(function (r) { both.label = r; return both; }, function () { return both; });
           })
           .then(function (both) {
             var o = both.o, sp = both.sp;
             ocrText = o.text;
             ocrSparse = sp ? sp.text : null;
             ocrExtra = both.extra || null;
+            ocrLabel = both.label || null;
+            if (both.digits == null && ocrLabel && ocrLabel.price != null) both.digits = ocrLabel.price;
             /* 数字専用の辞書で読めた価格を最優先する。読めなかったときだけ、
                日本語の辞書で読んだ大きな字の価格から投票で選ぶ */
             ocrPriceSure = both.digits != null;
@@ -2563,6 +2758,7 @@ function renderRedactedPage(page, extraWords, scale, forceOcr) {
         ocrText: ocrText,
         ocrSparse: ocrSparse,   /* 散らばった文字を拾う読み方の結果 */
         ocrExtra: ocrExtra,     /* 表の罫線を消して読み直した結果（項目が足りないページだけ） */
+        ocrLabel: ocrLabel,     /* 見出しのすぐ右・下を読み直した値 {name, area, floor, price} */
         ocrPriceSure: ocrPriceSure,   /* 価格を数字専用の辞書で読めた */
         ocrPrice: ocrPrice   /* 文字認識で大きな字として読めた価格（無ければ null） */
       };
@@ -3388,6 +3584,41 @@ function mergeOcrResult(res, im, extraWords) {
   rec.name = mergeName(res.record.name, redact(sparse, extraWords).text, rec.type) ||
              (res.record.name ? res.record.name : (pickNameOcr(redact(dense, extraWords).text, true) ||
                (extra ? pickName(normalizeOcr(redact(extra, extraWords).text), rec.type, true) : null) || null));
+  /* 見出し（「物件名」「専有面積」）のすぐ右・下を読み直した値。見出しに結び付いた値なので、
+     文字データの無いページではこちらを優先する（文字データで読めた名前はそのまま） */
+  var lab = im.ocrLabel || {};
+  /* 見出しの下で読めた名前は、ほかの読み方で名前が取れなかったとき、または
+     2通り以上の読み方で同じ名前になった（確かな）ときに使う */
+  /* 1通りの読み方でしか読めなかった名前は、漢字の部分が駅名・地名に使われる字だけのときに限る
+     （「ノバンパラックォ両箔」のように地名の漢字が化けたものを載せないため） */
+  var placeChars = STATIONS.join('') + '町丁目公園前浜上下東西南北本通台山川';
+  var kanjiOk = function (v) {
+    return (String(v).match(/[一-龥]/g) || []).every(function (ch) { return placeChars.indexOf(ch) >= 0; });
+  };
+  if (lab.name && !res.record.name && (lab.nameVotes >= 2 || (!rec.name && kanjiOk(lab.name)))) rec.name = lab.name;
+  /* 面積は、ほかの読み方で取れなかったとき・小さすぎる（バルコニーなどを拾った）とき、
+     または紙面の坪数と見出しの値のほうが合うときに、見出しの値を使う */
+  if (lab.area != null && rec.type !== 'house') {
+    var tsb = (zen2han(raw + '\n' + allOcr).replace(/([0-9])\.\s+([0-9])/g, '$1.$2')
+      .match(/[0-9]+(?:\.[0-9]+)?(?=\s*坪)/g) || []).map(Number);
+    var fitsT = function (v) { return tsb.some(function (t) { return Math.abs(v * 0.3025 - t) < 0.15; }); };
+    if (rec.ownArea == null || rec.ownArea < 20 || (!fitsT(rec.ownArea) && fitsT(lab.area))) rec.ownArea = lab.area;
+  }
+  if (lab.floor != null && rec.type === 'house' && (rec.floorArea == null || rec.floorArea < 30)) rec.floorArea = lab.floor;
+  /* それでも専有面積が無いとき：表の枠の中の「80.2㎡」は、単位の「㎡」が「w」「n」「a」に化け、
+     見出しも読めないことがある。枠の区切り（｜）に挟まれた小数の値が1つだけなら、それを使う。
+     敷地・バルコニー・テラスなどの値や、10㎡未満の値は除く */
+  if (rec.type !== 'house' && rec.ownArea == null) {
+    var cellVals = {}, cm, cre = /([^\n|｜]{0,8})[|｜]?\s*([0-9]{2,3}\.[0-9]{1,2})\s*[a-zA-Z㎡]?\s*[|｜]/g;
+    var zo = zen2han(allOcr);
+    while ((cm = cre.exec(zo))) {
+      var cv2 = Number(cm[2]);
+      if (cv2 < 20 || cv2 > 300 || AREA_NG.test(cm[1])) continue;
+      cellVals[cv2] = true;
+    }
+    var ck = Object.keys(cellVals);
+    if (ck.length === 1) rec.ownArea = Number(ck[0]);
+  }
   /* 物件名が読めないとき（飾り文字・写真の上の文字）は、所在地から仮の名前をつける
      （「西宮市上鳴尾町のマンション」）。確認画面で黄色く示し、正しい名前に直してもらう */
   if (!rec.name) {
@@ -3935,6 +4166,7 @@ window.__RE = {
   mergeOcrResult: mergeOcrResult, voteOcrPrice: voteOcrPrice, pickNameOcr: pickNameOcr, Ocr: Ocr,
   pickPriceByText: pickPriceByText, tightenText: tightenText, pickAddressOcr: pickAddressOcr, Store: Store,
   pickWalkDict: pickWalkDict, matchStation: matchStation, removeRules: removeRules, pickStationDict: pickStationDict,
+  readByLabels: readByLabels, cropForRead: cropForRead, unslant: unslant,
   /* 検証用：確認待ちの物件の状態（掲載できない理由・保存する大きさ） */
   __drafts: function () {
     return drafts.map(function (d) {
