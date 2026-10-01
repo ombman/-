@@ -206,7 +206,7 @@ const allVals = drafts.map(d => d.vals.join('|')).join('||');
 ok('③ PDFから価格を読み取り', /価格（万円）=6480/.test(allVals) && /価格（万円）=12800/.test(allVals));
 ok('③ PDFから駅徒歩を読み取り', /徒歩分数（分）=7/.test(allVals) && /徒歩分数（分）=4/.test(allVals));
 ok('③ PDFから延床面積を読み取り（戸建）', /延床面積（㎡）=96.88/.test(allVals));
-ok('③ PDFから専有面積・持分を読み取り（区分）', /専有面積（㎡）=68.42/.test(allVals) && /持分=100000分の1250/.test(allVals));
+ok('③ PDFから専有面積を読み取り（区分）／持分の欄は出さない', /専有面積（㎡）=68.42/.test(allVals) && !/持分=/.test(allVals));
 ok('④ 削除した箇所数が表示される', drafts.every(d => /か所<\/b> 伏せました/.test(d.redacted) || /か所 伏せました/.test(d.redacted)), drafts[0].redacted);
 const rawShown = await admin.$$eval('#reviewArea .raw pre', e => e.map(x => x.textContent).join('\n'));
 ok('④ 確認用テキストにも情報元が残っていない', !/株式会社|有限会社|03-1234|0120|@/.test(rawShown));
@@ -237,7 +237,7 @@ ok('① ユーザー画面に2件が掲載される', cards.length === 2, `${car
 cards.forEach(c => console.log('    ' + c.slice(0, 150)));
 ok('ユーザー画面に価格が表示', cards.join().includes('6,480万円') && cards.join().includes('1億2,800万円'));
 ok('戸建カードに延床面積', cards.some(c => /延床面積\s*96\.88㎡/.test(c)));
-ok('区分カードに専有面積と持分', cards.some(c => /専有面積\s*68\.42㎡/.test(c) && /持分\s*100000分の1250/.test(c)));
+ok('区分カードに専有面積（持分は載せない）', cards.some(c => /専有面積\s*68\.42㎡/.test(c)) && !cards.some(c => /持分/.test(c)));
 ok('④ ユーザー画面に情報元が出ていない', !/株式会社|有限会社|03-1234|0120|山田|鈴木/.test(cards.join()));
 ok('カード内にもLINEボタン', (await pub.$$eval('#pubGrid .btn-line', e => e.map(x => x.href))).every(h => h === 'https://lin.ee/ucovrzE'));
 

@@ -1520,7 +1520,7 @@ function extractAll(sections, extraWords, opts) {
 /* 種別ごとの必須項目（※1） */
 function requiredKeys(type) {
   return type === 'mansion'
-    ? ['priceMan', 'walkMin', 'ageYears', 'ownArea', 'share']
+    ? ['priceMan', 'walkMin', 'ageYears', 'ownArea']   /* 持分は記載しない */
     : ['priceMan', 'walkMin', 'ageYears', 'floorArea'];
 }
 var FIELD_LABEL = {
@@ -3307,7 +3307,7 @@ function cardHtml(p) {
   specs += specRow('築年数', p.ageYears != null ? (p.ageYears === 0 ? '新築' : p.ageYears + '年') + (p.builtLabel ? '（' + p.builtLabel + '築）' : '') : null);
   if (t === 'mansion') {
     specs += specRow('専有面積', p.ownArea, '㎡');
-    specs += specRow('持分', p.share);
+    /* 持分はユーザー画面に載せない（運用上不要のため） */
   } else {
     specs += specRow('延床面積', p.floorArea, '㎡');
   }
