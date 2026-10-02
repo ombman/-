@@ -1840,7 +1840,7 @@ function unslant(c, k) {
 }
 
 /* 数字を3通りの大きさで読んで多数決（re の1つ目の組を数値にする） */
-function readNumberAt(canvas, box, re, toVal) {
+function readNumberAt(canvas, box, re, toVal, minAgree) {
   /* 大きさ3通り（そのまま）と、斜体をまっすぐにしたもの4通りで読み、多数決で決める */
   var variants = [[0, 36], [0, 60], [0, 90], [0.15, 48], [0.15, 64], [0.25, 48], [0.25, 64]];
   var reads = [];
@@ -1871,6 +1871,9 @@ function readNumberAt(canvas, box, re, toVal) {
     Object.keys(cnt).forEach(function (k) { if (cnt[k] > cnt[best]) best = Number(k); });
     /* 読み方によって値が割れるとき（2回以上同じ値にならない）は、確かでないので使わない */
     if (reads.length >= 3 && cnt[best] < 2) return null;
+    /* 価格は、同じ値に2回以上読めたときだけ使う。大きな斜体の価格の上下が欠けた範囲を
+       読むと、1回だけ「10,750」のような別の値に読めることがある（「6,980」の資料で発生） */
+    if (minAgree && cnt[best] < minAgree) return null;
     return best;
   });
 }
@@ -1963,7 +1966,7 @@ function readByLabels(canvas, lines, want) {
   }
   if (want.area) tryRegions(labelBoxes(lines, LABEL_AREA).slice(0, 2), function (b) { return readNumberAt(canvas, b, areaRe, areaVal); }, 'area');
   if (want.floor) tryRegions(labelBoxes(lines, LABEL_FLOOR).slice(0, 2), function (b) { return readNumberAt(canvas, b, areaRe, areaVal); }, 'floor');
-  if (want.price) tryRegions(labelBoxes(lines, LABEL_PRICE).slice(0, 2), function (b) { return readNumberAt(canvas, b, priceRe, priceVal); }, 'price');
+  if (want.price) tryRegions(labelBoxes(lines, LABEL_PRICE).slice(0, 2), function (b) { return readNumberAt(canvas, b, priceRe, priceVal, 2); }, 'price');
   if (want.name) tryRegions(labelBoxes(lines, LABEL_NAME).slice(0, 2), function (b) {
     return readNameAt(canvas, b).then(function (r) { if (r) res.nameVotes = r.n; return r ? r.v : null; });
   }, 'name');
@@ -2901,7 +2904,10 @@ function renderRedactedPdf(file, extraWords, opts) {
       var onPage = opts && opts.onPage;
       function next() {
         if (i > pdf.numPages) return Promise.resolve(out);
+        if (opts && opts.stop && opts.stop()) return Promise.resolve(out);
         var n = i++;
+        /* 前回の途中から再開するときは、終わっていないページだけを処理する */
+        if (opts && opts.only && !opts.only[n]) return next();
         var force = !!(opts && opts.ocrPages && opts.ocrPages[n]);
         return pdf.getPage(n)
           .then(function (pgPaths) {
@@ -3239,6 +3245,39 @@ var DraftStore = (function () {
     clear: function () {
       if (timer) { clearTimeout(timer); timer = null; }
       return tx('readwrite', function (st) { return st.delete(KEY); }).catch(function () {});
+    },
+    /* 資料画像の作成・文字認識の途中で画面を閉じても続きから再開できるよう、
+       元のPDFそのものと、文字認識で読み直すページを保管しておく */
+    saveFlush: function (list) {
+      if (timer) { clearTimeout(timer); timer = null; }
+      return tx('readwrite', function (st) {
+        return st.put({ at: Date.now(), drafts: list }, KEY);
+      });
+    },
+    saveJob: function (name, file, ocrPages) {
+      return tx('readwrite', function (st) {
+        return st.put({ name: name, file: file, ocrPages: ocrPages, at: Date.now() }, 'job:' + name);
+      });
+    },
+    loadJobs: function () {
+      return tx('readonly', function (st) { return st.getAll(); }).then(function (all) {
+        return (all || []).filter(function (x) { return x && x.file && x.name; });
+      }).catch(function () { return []; });
+    },
+    deleteJob: function (name) {
+      return tx('readwrite', function (st) { return st.delete('job:' + name); }).catch(function () {});
+    },
+    clearJobs: function () {
+      return tx('readwrite', function (st) {
+        var rq = st.openCursor();
+        rq.onsuccess = function () {
+          var c = rq.result;
+          if (!c) return;
+          if (String(c.key).indexOf('job:') === 0) c.delete();
+          c.continue();
+        };
+        return rq;
+      }).catch(function () {});
     }
   };
 })();
@@ -3378,7 +3417,7 @@ document.addEventListener('click', function (e) {
    7. 管理画面
    ================================================================= */
 var authToken = null, drafts = [], archive = [];
-var busyReading = false;   /* 資料の読み取り中は画面を閉じないよう引き止める */
+var busyReading = 0;   /* 資料の文字を読み取り中の数（保管前に閉じると失われるので引き止める） */
 
 function ngWords() {
   return (document.getElementById('ngWords').value || '')
@@ -3412,12 +3451,13 @@ function doLogin() {
     document.getElementById('btnLogout').hidden = false;
     setModeBadge();
     refresh();
+    resumeJobs();
   });
 }
 document.getElementById('btnLogin').addEventListener('click', doLogin);
 document.getElementById('pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 document.getElementById('btnLogout').addEventListener('click', function () {
-  authToken = null; drafts = []; archive = [];
+  authToken = null; drafts = []; archive = []; jobGen++;
   document.getElementById('adminBody').hidden = true;
   document.getElementById('btnLogout').hidden = true;
   document.getElementById('adminLogin').hidden = false;
@@ -3453,7 +3493,9 @@ function handleFiles(fileList) {
     log.appendChild(line);
 
     var isPdf = /\.pdf$/i.test(file.name || '') || file.type === 'application/pdf';
-    busyReading = true;
+    busyReading++;
+    var busy = true;
+    var unbusy = function () { if (busy) { busy = false; busyReading--; } };
     readAny(file).then(function (sections) {
       var all = (sections || []).join('\n');
       if (!isPdf && (!all || all.replace(/\s/g, '').length < 20)) {
@@ -3502,111 +3544,136 @@ function handleFiles(fileList) {
           r.ocrPending = true;
         });
         renderReview();
-        var attached = 0, cut = 0, painted = 0, ocred = 0, manual = 0, done = 0;
-
-        /* 1ページ分の資料画像と文字認識結果を、その場でドラフトに取り込む。
-           項目が増えたときだけ true を返し、確認画面の描き直しを最小限にする。 */
-        function applyPage(im) {
-          var changed = false;
-          for (var di = 0; di < drafts.length; di++) {
-            var d = drafts[di];
-            if (d.res.pageNo !== im.pageNo || d.res.record.sourceFile !== file.name) continue;
-
-            /* 文字認識の結果を、元の文字と合わせてもう一度読み取り直す。
-               片方にしか出てこない項目（価格だけ画像、面積だけ文字など）を拾うため。
-               閾値を8文字に下げ、少ししか読み取れなくても活用する。 */
-            var merged = mergeOcrResult(d.res, im, ngWords());
-            if (merged) {
-              /* 読み取れる項目が増えたときだけ置き換える（減らさない） */
-              if (merged.filled >= d.res.filled) {
-                if (merged.filled > d.res.filled) changed = true;
-                merged.ocr = true;
-                merged.wasNoText = d.res.noText;
-                d.res = merged;
-              } else {
-                /* 項目の数では元のほうが多くても、物件名と種別は補う */
-                var cur = d.res.record;
-                if (!cur.name && merged.record.name) {
-                  cur.name = merged.record.name; changed = true;
-                  if (merged.nameGuessed) d.res.nameGuessed = true;
-                }
-                if (cur.type !== 'house' && cur.type !== 'mansion' &&
-                    (merged.record.type === 'house' || merged.record.type === 'mansion')) {
-                  cur.type = merged.record.type; changed = true;
-                }
-                d.res.ocr = true;
-              }
-              if (d.res.filled > 0) d.res.noText = false;
-              ocred++;
-            }
-            /* 文字認識で大きな字の価格だけ読めた場合も取り込む */
-            /* 賃貸の資料では大きな数字は家賃なので、価格の推測はしない */
-            if (d.res.record.priceMan == null && im.ocrPrice != null &&
-                !RENTAL_RE.test((d.res.rawText || '') + (im.ocrText || ''))) {
-              d.res.record.priceMan = im.ocrPrice;
-              d.res.filled = filledCount(d.res.record);
-              changed = true;
-            }
-            d.res.ocrPending = false;
-            d.res.sheet = im;
-
-            if (im.fits === false) {
-              /* 画質を落としても大きすぎる資料。掲載すると保存時に弾かれるため付けない */
-              d.res.record.sheetImage = null;
-              d.res.tooBig = true;
-              manual++;
-            } else {
-              /* 必ず資料画像を掲載する。スキャンのみでOCRが取れなかったページも
-                 管理者が確認できるよう添付し、不要なら「掲載しない」で外してもらう。 */
-              d.res.record.sheetImage = im.dataUrl;
-              attached++; painted += im.masked;
-              if (im.croppedPx > 0) cut++;
-              /* 塗りつぶしが効きすぎて見送ったページも目視確認にまわす */
-              if (im.overPaint) { d.res.needsVisualCheck = true; manual++; }
-              /* テキストが取れず、消去位置を確定できなかったページは目視確認を促す */
-              else if (d.res.noText && !d.res.ocr) {
-                d.res.needsVisualCheck = true;
-                manual++;
-              }
-            }
-            changed = true;   /* 資料画像が付いたので描き直す */
-            break;
-          }
-          return changed;
-        }
-
-        var PROG_RE = /<br><span class="spin"><\/span> 掲載用の資料画像を作成中…[^<]*/;
-        return renderRedactedPdf(file, ngWords(), {
-          ocrPages: ocrPages,
-          onPage: function (im, n, total) {
-            var changed = applyPage(im);
-            done++;
-            /* 進捗を出す。スキャン資料は1ページ数秒かかるため、
-               何ページ目まで終わったかが見えないと止まったように見える。
-               PROG_RE は次のタグまでを消して差し替えるので、
-               進捗の数字にタグを使うと古い表示が消えずに積み重なる。 */
-            line.innerHTML = line.innerHTML.replace(PROG_RE,
-              '<br><span class="spin"></span> 掲載用の資料画像を作成中… ' +
-              done + '／' + total + 'ページ');
-            if (changed) renderReview();
-          }
-        }).then(function () {
-          clearPending(file.name);
-          line.innerHTML = line.innerHTML.replace(PROG_RE,
-            '<br>掲載用の資料画像を <b>' + attached + '件</b>作成しました' +
-            '（連絡先 ' + painted + ' 行を消去' + (cut ? '、' + cut + '件は下部の連絡先欄を切り取り' : '') + '）' +
-            (ocred ? '<br><b>' + ocred + 'ページ</b>は画像から文字認識で読み直しました' : '') +
-            (manual ? '<br><span style="color:var(--warn)">' + manual +
-              'ページは文字認識でも読み取れませんでした（手入力、資料画像は目視確認のうえ掲載）</span>' : ''));
-          renderReview();
-        });
+        return runPdfJob(file, line, ocrPages, null, unbusy);
       }
     }).catch(function (err) {
       clearPending(file.name); renderReview();
       line.className = 'err';
       line.innerHTML = '✖ ' + esc(file.name) + '：' + esc(err.message || String(err));
-    }).then(function () { busyReading = false; });
+    }).then(unbusy);
   });
+}
+
+/* PDFの各ページから、情報元を消した掲載用の資料画像を作り、文字認識で読み直す。
+   only：処理するページ（前回の途中から再開するとき。null なら全ページ）。
+   元のPDFを保管しておき、途中で画面を閉じても次に管理画面を開いたときに
+   残りのページから再開する（ブラウザの仕組み上、閉じている間は処理できない） */
+var jobGen = 0;   /* 「すべて破棄」で増やし、動いている処理を止める */
+var unsavedJobs = 0;   /* 保管できなかった処理の数（閉じると失われるので引き止める） */
+var CLOSE_OK = '（この画面は閉じても大丈夫です。次に管理画面でログインすると続きから再開します）';
+function runPdfJob(file, line, ocrPages, only, onSaved) {
+  var gen = jobGen, saved = false;
+  var keep = DraftStore.saveJob(file.name, file, ocrPages)
+    .then(function () { return DraftStore.saveFlush(drafts); })
+    .then(function () { saved = true; }, function () { unsavedJobs++; })
+    .then(function () { if (onSaved) onSaved(); });
+  return keep.then(function () {
+    if (saved) line.innerHTML = line.innerHTML.replace(/(掲載用の資料画像を作成中…[^<]*)/, '$1' + CLOSE_OK);
+    var attached = 0, cut = 0, painted = 0, ocred = 0, manual = 0, done = 0;
+
+    /* 1ページ分の資料画像と文字認識結果を、その場でドラフトに取り込む。
+       項目が増えたときだけ true を返し、確認画面の描き直しを最小限にする。 */
+    function applyPage(im) {
+      var changed = false;
+      for (var di = 0; di < drafts.length; di++) {
+        var d = drafts[di];
+        if (d.res.pageNo !== im.pageNo || d.res.record.sourceFile !== file.name) continue;
+
+        /* 文字認識の結果を、元の文字と合わせてもう一度読み取り直す。
+           片方にしか出てこない項目（価格だけ画像、面積だけ文字など）を拾うため。
+           閾値を8文字に下げ、少ししか読み取れなくても活用する。 */
+        var merged = mergeOcrResult(d.res, im, ngWords());
+        if (merged) {
+          /* 読み取れる項目が増えたときだけ置き換える（減らさない） */
+          if (merged.filled >= d.res.filled) {
+            if (merged.filled > d.res.filled) changed = true;
+            merged.ocr = true;
+            merged.wasNoText = d.res.noText;
+            d.res = merged;
+          } else {
+            /* 項目の数では元のほうが多くても、物件名と種別は補う */
+            var cur = d.res.record;
+            if (!cur.name && merged.record.name) {
+              cur.name = merged.record.name; changed = true;
+              if (merged.nameGuessed) d.res.nameGuessed = true;
+            }
+            if (cur.type !== 'house' && cur.type !== 'mansion' &&
+                (merged.record.type === 'house' || merged.record.type === 'mansion')) {
+              cur.type = merged.record.type; changed = true;
+            }
+            d.res.ocr = true;
+          }
+          if (d.res.filled > 0) d.res.noText = false;
+          ocred++;
+        }
+        /* 文字認識で大きな字の価格だけ読めた場合も取り込む */
+        /* 賃貸の資料では大きな数字は家賃なので、価格の推測はしない */
+        if (d.res.record.priceMan == null && im.ocrPrice != null &&
+            !RENTAL_RE.test((d.res.rawText || '') + (im.ocrText || ''))) {
+          d.res.record.priceMan = im.ocrPrice;
+          d.res.filled = filledCount(d.res.record);
+          changed = true;
+        }
+        d.res.ocrPending = false;
+        d.res.sheet = im;
+
+        if (im.fits === false) {
+          /* 画質を落としても大きすぎる資料。掲載すると保存時に弾かれるため付けない */
+          d.res.record.sheetImage = null;
+          d.res.tooBig = true;
+          manual++;
+        } else {
+          /* 必ず資料画像を掲載する。スキャンのみでOCRが取れなかったページも
+             管理者が確認できるよう添付し、不要なら「掲載しない」で外してもらう。 */
+          d.res.record.sheetImage = im.dataUrl;
+          attached++; painted += im.masked;
+          if (im.croppedPx > 0) cut++;
+          /* 塗りつぶしが効きすぎて見送ったページも目視確認にまわす */
+          if (im.overPaint) { d.res.needsVisualCheck = true; manual++; }
+          /* テキストが取れず、消去位置を確定できなかったページは目視確認を促す */
+          else if (d.res.noText && !d.res.ocr) {
+            d.res.needsVisualCheck = true;
+            manual++;
+          }
+        }
+        changed = true;   /* 資料画像が付いたので描き直す */
+        break;
+      }
+      return changed;
+    }
+
+    var PROG_RE = /<br><span class="spin"><\/span> 掲載用の資料画像を作成中…[^<]*/;
+    var total = only ? Object.keys(only).length : null;
+    return renderRedactedPdf(file, ngWords(), {
+      ocrPages: ocrPages,
+      only: only,
+      stop: function () { return gen !== jobGen; },
+      onPage: function (im, n, all) {
+        if (gen !== jobGen) return;   /* 「すべて破棄」された */
+        var changed = applyPage(im);
+        done++;
+        /* 進捗を出す。スキャン資料は1ページ数秒かかるため、
+           何ページ目まで終わったかが見えないと止まったように見える。
+           PROG_RE は次のタグまでを消して差し替えるので、
+           進捗の数字にタグを使うと古い表示が消えずに積み重なる。 */
+        line.innerHTML = line.innerHTML.replace(PROG_RE,
+          '<br><span class="spin"></span> 掲載用の資料画像を作成中… ' +
+          done + '／' + (total || all) + 'ページ' + (saved ? CLOSE_OK : ''));
+        if (changed) renderReview();
+      }
+    }).then(function () {
+      if (gen !== jobGen) return;
+      clearPending(file.name);
+      DraftStore.deleteJob(file.name);
+      line.innerHTML = line.innerHTML.replace(PROG_RE,
+        '<br>掲載用の資料画像を <b>' + attached + '件</b>作成しました' +
+        '（連絡先 ' + painted + ' 行を消去' + (cut ? '、' + cut + '件は下部の連絡先欄を切り取り' : '') + '）' +
+        (ocred ? '<br><b>' + ocred + 'ページ</b>は画像から文字認識で読み直しました' : '') +
+        (manual ? '<br><span style="color:var(--warn)">' + manual +
+          'ページは文字認識でも読み取れませんでした（手入力、資料画像は目視確認のうえ掲載）</span>' : ''));
+      renderReview();
+    });
+  }).then(function () { if (!saved) unsavedJobs--; }, function (e) { if (!saved) unsavedJobs--; throw e; });
 }
 
 /* 文字認識で読めた価格の候補から1つを選ぶ。
@@ -3701,6 +3768,29 @@ function mergeOcrResult(res, im, extraWords) {
     rec.station = pickStationDict(raw + '\n' + allOcr);
   } else if (rec.station && !/^[一-龥ぁ-んァ-ヶー・]{1,10}駅?$/.test(rec.station)) {
     rec.station = null; rec.walkMin = null;
+  }
+  /* 築年数：表の枠の中の「築年月 2000年6月」は、見出しが「笑キ月」「全年月」のように化けて
+     読めないことがある。日付（◯日）の付かない「西暦◯年◯月」が1つだけで、引渡・更新などの
+     日付でなければ、それを築年月とみなす */
+  if (rec.ageYears == null) {
+    var ymAll = {}, ymLab = {}, ym, yre = /([^\n]{0,8}?)((?:19|20)[0-9]{2})\s*年\s*([0-9]{1,2})\s*月(?!\s*[0-9]{1,2}\s*日)/g;
+    var zAll = zen2han(raw + '\n' + allOcr), thisY = new Date().getFullYear();
+    while ((ym = yre.exec(zAll))) {
+      var yy = Number(ym[2]), mm = Number(ym[3]);
+      if (yy < 1950 || yy >= thisY || mm < 1 || mm > 12) continue;
+      if (/引渡|引き渡|入居|更新|現況|有効|期限|取引|作成|まで|予定|改装|リフォーム|交換|済/.test(ym[1])) continue;
+      ymAll[yy + '-' + mm] = [yy, mm];
+      /* 化けた見出しの名残（「笑キ月」「全年月」）が直前にある年月 */
+      if (/[築年月キ]/.test(ym[1].slice(-4))) ymLab[yy + '-' + mm] = [yy, mm];
+    }
+    var yk = Object.keys(ymAll);
+    /* リフォーム履歴（「◇2024年12月 ガス給湯器交換」）など年月が複数あるときは、
+       見出しの名残が直前にある年月が1つだけなら、それを築年月とみなす */
+    if (yk.length > 1 && Object.keys(ymLab).length === 1) { ymAll = ymLab; yk = Object.keys(ymLab); }
+    if (yk.length === 1) {
+      var ra = ageFromYM(ymAll[yk[0]][0], ymAll[yk[0]][1]);
+      if (ra) { rec.ageYears = ra.years; rec.builtLabel = ra.built; }
+    }
   }
   /* 種別に合わない面積は持たない（マンションに延床面積は無い） */
   if (rec.type === 'mansion') rec.floorArea = null;
@@ -4095,7 +4185,8 @@ document.getElementById('btnPublishAll').addEventListener('click', function () {
 });
 document.getElementById('btnDiscardAll').addEventListener('click', function () {
   if (!confirm('読み取った ' + drafts.length + ' 件をすべて破棄しますか？')) return;
-  DraftStore.clear();
+  DraftStore.clear(); DraftStore.clearJobs();
+  jobGen++; pendingJobs = [];   /* 作成中の資料画像も止める */
   drafts = []; document.getElementById('bulkLog').innerHTML = ''; renderReview();
 });
 
@@ -4210,11 +4301,28 @@ document.getElementById('admRows').addEventListener('click', function (e) {
 /* --- 前回の読み取り途中の下書きを戻す ---
    資料が多いと文字認識に数分かかる。その途中で画面を閉じても
    作業が消えないよう、保管しておいた下書きから再開できるようにする。 */
-DraftStore.load().then(function (saved) {
-  if (!saved || !saved.drafts || !saved.drafts.length || drafts.length) return;
+var pendingJobs = [];   /* 途中で閉じた資料画像の作成。ログインしたら続きから再開する */
+Promise.all([DraftStore.load(), DraftStore.loadJobs()]).then(function (got) {
+  var saved = got[0], jobs = got[1] || [];
+  if (!saved || !saved.drafts || !saved.drafts.length || drafts.length) {
+    if (!drafts.length) DraftStore.clearJobs();
+    return;
+  }
   drafts = saved.drafts;
-  /* 途中で閉じた資料の読み直しは再開できないため、手入力に切り替える */
-  drafts.forEach(function (d) { d.res.ocrPending = false; });
+  /* 元のPDFを保管してある資料は、終わっていないページを再開する（ログイン後）。
+     保管が無い資料は再開できないため、手入力に切り替える */
+  jobs.forEach(function (j) {
+    var only = {}, left = 0;
+    drafts.forEach(function (d) {
+      if (d.res.record.sourceFile === j.name && d.res.ocrPending && d.res.pageNo) { only[d.res.pageNo] = true; left++; }
+    });
+    if (left) pendingJobs.push({ job: j, only: only, left: left });
+    else DraftStore.deleteJob(j.name);
+  });
+  drafts.forEach(function (d) {
+    var resumable = pendingJobs.some(function (p) { return p.job.name === d.res.record.sourceFile; });
+    if (!resumable) d.res.ocrPending = false;
+  });
   renderReview();
   var log = document.getElementById('dropLog');
   if (log) {
@@ -4223,14 +4331,38 @@ DraftStore.load().then(function (saved) {
     var line = document.createElement('div');
     line.className = 'ok';
     line.innerHTML = '前回の読み取り結果 <b>' + saved.drafts.length + '件</b>を戻しました（' +
-      hh + ':' + mm + ' 時点）。続きから確認・掲載できます。';
+      hh + ':' + mm + ' 時点）。続きから確認・掲載できます。' +
+      (pendingJobs.length ? '<br>資料画像の作成が途中だった資料は、ログインすると続きから再開します。' : '');
     log.insertBefore(line, log.firstChild);
   }
+  if (authToken) resumeJobs();
 }).catch(function () {});
+
+/* 途中だった資料画像の作成を、終わっていないページから再開する（1資料ずつ） */
+function resumeJobs() {
+  var list = pendingJobs; pendingJobs = [];
+  var log = document.getElementById('dropLog');
+  list.reduce(function (chain, p) {
+    return chain.then(function () {
+      var j = p.job;
+      var file = j.file instanceof File && j.file.name === j.name ? j.file : new File([j.file], j.name, { type: 'application/pdf' });
+      var line = document.createElement('div');
+      line.className = 'ok';
+      line.innerHTML = '↻ ' + esc(j.name) + '：前回の続きから再開します（残り ' + p.left + 'ページ）' +
+        '<br><span class="spin"></span> 掲載用の資料画像を作成中…';
+      log.appendChild(line);
+      return runPdfJob(file, line, j.ocrPages || {}, p.only).catch(function (err) {
+        clearPending(j.name); renderReview();
+        line.className = 'err';
+        line.innerHTML = '✖ ' + esc(j.name) + '：' + esc(err.message || String(err));
+      });
+    });
+  }, Promise.resolve());
+}
 
 /* 読み取りの途中で閉じようとしたら引き止める */
 window.addEventListener('beforeunload', function (e) {
-  if (!busyReading) return;
+  if (!busyReading && !unsavedJobs) return;
   e.preventDefault(); e.returnValue = '';
 });
 
