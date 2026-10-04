@@ -446,7 +446,13 @@ var ATTR_COMPANY_PAIR = new RegExp(
   '(' + ATTR_LABEL + '[\\s　]*[／\\/：:・]?[\\s　\\n]{0,3})' +
   '([^\\s　、。，,\\n\\/／|｜]{1,28})', 'g');
 /* ただし同じ行に連絡先が並んでいれば、その行は情報元とみなして消す */
-var CONTACT_MARK = /(?:TEL|Tel|tel|FAX|Fax|ＴＥＬ|ＦＡＸ|℡|☎|電話|免許|担当|@|https?:\/\/|www\.)/;
+/* 「@」はメールアドレスの形のときだけ連絡先とみなす。スキャン資料では
+   行頭の「●」が「@」と読まれることが多く、物件概要の細かい文字を業者欄と取り違えていた */
+var CONTACT_MARK = /(?:TEL|Tel|tel|FAX|Fax|ＴＥＬ|ＦＡＸ|℡|☎|電話|免許|担当|[A-Za-z0-9._-]@[A-Za-z0-9-]+\.|https?:\/\/|www\.)/;
+/* 管理会社・管理事務所の電話番号は物件の情報（掲載元の連絡先ではない）なので消さない。
+   判定の前に取り除いておく。「管理」は文字認識で「寄理」「商理」「密理」と読まれることがある */
+var ATTR_PHONE = /(?:[管寄商密審菅]?[\s　]*理[\s　]*会[\s　]*社|管[\s　]*理[\s　]*(?:事[\s　]*務[\s　]*所|人[\s　]*室|組[\s　]*合))[\s　]*(?:の)?[\s　]*(?:TEL|Tel|tel|ＴＥＬ|電話(?:番号)?|℡)?[\s　]*[:：]?[\s　]*[(（]?0[0-9]{1,4}[)）\-ー－.\s]*[0-9]{1,4}[\-ー－.\s]*[0-9]{3,4}/g;
+function stripAttrPhone(t) { return String(t || '').replace(ATTR_PHONE, ' '); }
 /* 情報元（掲載元の不動産会社）を示す印。物件情報の語が混じっていても、
    これがある行は情報元として扱う。 */
 var SOURCE_MARK = /株式会社|有限会社|（株）|\(株\)|㈱|㈲|国土交通大臣|知事\s*[(（]|第[0-9]{3,}号/;
@@ -471,7 +477,7 @@ var BAND_HINT = new RegExp([
   '担当', '取引態様', '媒介', '報酬形態',
   '営業所', '支店', '本店',
   '広告不可', '広告可', '検索',
-  '@', 'https?://', 'www\\.'
+  '[A-Za-z0-9._-]@[A-Za-z0-9-]+\\.', 'https?://', 'www\\.'
 ].join('|'));
 /* 帯として切り取ってよい範囲。実際の業者欄はページ高の5〜15%程度なので、
    下から22%までに限る。これ以上切ると物件情報を巻き込む。 */
@@ -485,6 +491,7 @@ var BAND_NOTE = /優先|ご了承|予告なく/;
 /* 業者の印（電話・免許・担当・取引態様など）がある行か。
    「管理会社：◯◯㈱」のような物件の属性としての社名は帯の印にしない。 */
 function bandIsHint(t) {
+  t = stripAttrPhone(t);
   return (BAND_HINT.test(t) || STRONG_CONTACT.test(t)) && !ATTR_COMPANY_LINE.test(t);
 }
 /* 物件情報の「値」の行か。語だけでなく数字を伴うものに限る。
@@ -2197,6 +2204,8 @@ function isSensitiveText(str, extraWords, ocrOnly) {
     var w = String(extraWords[i]).trim();
     if (w.length >= 2 && t.indexOf(w) !== -1) return true;
   }
+  /* 管理会社の電話番号は物件の情報なので、消す判定から外す */
+  t = stripAttrPhone(t);
   /* 分譲会社・施工会社・設計会社・管理会社の欄は物件情報として残す。
      ただし同じ行に電話番号などが並んでいれば情報元とみなして消す。 */
   if (ATTR_COMPANY_LINE.test(t) && !CONTACT_MARK.test(t)) return false;
@@ -2745,6 +2754,40 @@ function renderRedactedPage(page, extraWords, scale, forceOcr, turn) {
             return tx.replace(/\s/g, '') && !isSensitiveText(tx, extraWords) && !BAND_NOTE.test(tx);
           }).length;
           if (loseTexts === 0) { cutAt = px; cropped = H - cutAt; }
+        }
+      }
+
+      /* 切る位置の最終確認。切り落とす範囲のうち、業者欄の最初の印（社名・電話・免許など）より
+         上に物件の情報（周辺施設・リフォーム内容・物件概要の細かい文字など）の行があれば、
+         その行の下まで切る位置を下げる。業者欄だけを切り、物件の情報は残すため */
+      if (cutAt < H) {
+        var allBand = bandLines.concat(extraBandLines || []);
+        var isSrcLine = function (t) {
+          return bandIsHint(t) || bandIsLooseHint(t) || SOURCE_MARK.test(t) || isSensitiveText(t, extraWords, true);
+        };
+        var srcTop = H;
+        allBand.forEach(function (l) {
+          if (l.y + (l.h || 0) > cutAt && isSrcLine(l.text || '') && l.y < srcTop) srcTop = l.y;
+        });
+        var keepBot = -1;
+        allBand.forEach(function (l) {
+          var t = String(l.text || ''), b = l.y + (l.h || 0);
+          /* 免責文（「現況を優先します」）は物件の情報ではないので、切る位置を下げる理由にしない
+             （下げると業者欄のロゴのかけらが残ることがある） */
+          if (b <= cutAt + 2 || l.y >= srcTop || isSrcLine(t) || BAND_NOTE.test(t)) return;
+          if ((t.match(/[一-龥ぁ-んァ-ヶ]/g) || []).length < 4) return;   /* 崩れた文字の切れ端は見ない */
+          if (!(bandIsValue(t) || BAND_STOP.test(t) ||
+                /まで|新調|新設|交換|張替|貼替|リフォーム|[0-9]\s*(?:m|分|帖|畳|円|戸|階)/.test(zen2han(t)))) return;
+          if (b > keepBot) keepBot = b;
+        });
+        if (keepBot > 0 && srcTop < H && keepBot < srcTop) {
+          /* 物件の情報の行と業者欄の間の余白で切る */
+          var nc = -1;
+          for (var gy2 = Math.ceil(keepBot) + 1; gy2 < srcTop - 1; gy2++) {
+            if (inkAt(gy2) < 0.004) { nc = gy2; break; }
+          }
+          if (nc < 0) nc = Math.round((keepBot + srcTop) / 2);
+          if (nc > cutAt) { cutAt = nc; cropped = H - cutAt; }
         }
       }
 
