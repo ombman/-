@@ -6,14 +6,15 @@ main.py
 全体の流れ:
     1) 設定を読み込む（URL等）。未設定なら設定画面を開いてもらう。
     2) ログイン情報を確認。未保存なら設定画面で入力してもらう。
-    3) Google Chrome を起動する。
-    4) REINSにログインする（失敗したらメッセージを出して停止）。
-    5) 「売買物件検索」の手順（search_recipe.json）を実行する。
+    3) 検索条件の画面を開き、物件種別・沿線・価格を決めてもらう。
+    4) Google Chrome を起動し、REINSにログインする（失敗したらメッセージを出して停止）。
+    5) 「売買物件検索」の手順（search_recipe.json）を、選んだ条件で実行する。
     6) 途中で失敗したら、その場で止めて、原因が分かるメッセージを表示する。
 
 起動オプション:
     python main.py            通常起動（自動検索を実行）
     python main.py --settings 設定画面だけを開く
+    python main.py --auto     条件画面を出さず、前回保存した条件で実行する
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from __future__ import annotations
 import sys
 import traceback
 
+import conditions
 import config
 import credentials
 from app_logger import get_logger
@@ -101,8 +103,25 @@ def main(argv: list[str]) -> int:
 
     timeout_ms = int(settings.get("default_timeout_ms", 15000))
 
+    # --- 検索条件を決める（起動時に条件画面を表示） ---
+    if "--auto" in argv:
+        cond = conditions.load_conditions()
+    else:
+        try:
+            import conditions_gui
+
+            cond = conditions_gui.open_conditions()
+        except Exception as exc:
+            log.error("検索条件の画面を開けませんでした: %s\n%s", exc, traceback.format_exc())
+            _show_error_dialog("エラー", f"検索条件の画面を開けませんでした。\n{exc}")
+            return 1
+        if cond is None:
+            log.info("検索条件の画面でキャンセルされました。終了します。")
+            return 0
+    log.info("検索条件: %s", conditions.summary(cond))
+
     try:
-        recipe = config.load_recipe()
+        recipe = conditions.apply_conditions(config.load_recipe(), cond)
     except FileNotFoundError as exc:
         _show_error_dialog("設定エラー", str(exc))
         return 1

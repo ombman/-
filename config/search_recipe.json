@@ -16,163 +16,565 @@
     "  optional          : true にすると、このステップが失敗しても止めずに次へ進みます",
     "  coordinate_fallback : [x, y]。HTMLで特定できない時だけ使う座標（補助手段）",
     "",
-    "★沿線の入力方式（重要）:",
-    "  REINSの『入力ガイド』ポップアップは使わず、沿線1〜3の入力欄へ駅名を直接入力します。",
-    "  各沿線の見出し（沿線1/沿線2/沿線3）を起点に、続く入力欄をXPathで指定します:",
-    "    見出しの後 input[1]=沿線名, input[2]=駅名(始), input[3]=駅名(終), input[4]=駅から徒歩,",
-    "    select[1]=徒歩の単位。",
-    "  沿線名は『完全一致』で誤ると0件になるため入力せず、駅名（完全一致・連絡駅も対象）で特定します。",
-    "  沿線3の終駅は、ご指示『香露園』を実在駅『香櫨園(こうろえん)』と解釈しています（違えば value を変更）。"
+    "★検索条件（物件種別・沿線・価格）について:",
+    "  条件の値はここに直接書かず、起動時の『検索条件の設定画面』で入力します",
+    "  （保存先: config/search_conditions.json）。value の {{ensen1_start}} などが差し込み記号です。",
+    "  requires に書いた条件が空欄（または沿線の『使う』がオフ）のステップは自動で省略されます。",
+    "  差し込み記号: shubetsu1 / ensen1_line, ensen1_start, ensen1_end, ensen1_walk（2,3も同様）/ price_min, price_max",
+    "",
+    "★沿線の入力方式:",
+    "  REINSの『入力ガイド』ポップアップは使わず、沿線1〜3の入力欄へ直接入力します。",
+    "  沿線欄にだけある『駅名』ラベル(N個目=沿線N)を起点に、preceding::input[1]=沿線名、",
+    "  following::input[1]=始駅、[2]=終駅、[3]=駅から徒歩、following::select[1]=徒歩の単位。"
   ],
-
   "steps": [
-    { "id": "open_baibai_search",
+    {
+      "id": "open_baibai_search",
       "description": "「売買物件検索」を探してクリックする",
       "action": "click",
       "targets": [
-        { "by": "role", "value": "売買物件検索", "options": { "role": "link" } },
-        { "by": "text", "value": "売買物件検索" }
+        {
+          "by": "role",
+          "value": "売買物件検索",
+          "options": {
+            "role": "link"
+          }
+        },
+        {
+          "by": "text",
+          "value": "売買物件検索"
+        }
       ],
-      "verify": { "contains": "物件種別" }
+      "verify": {
+        "contains": "物件種別"
+      }
     },
-    { "id": "select_bukken_shubetsu1_baimansion",
-      "description": "「物件種別1」から「売マンション」を選択する",
+    {
+      "id": "select_bukken_shubetsu1_baimansion",
+      "description": "「物件種別1」から「{{shubetsu1}}」を選択する",
       "action": "choose",
-      "value": "売マンション",
+      "value": "{{shubetsu1}}",
       "targets": [
-        { "by": "css", "value": "select:has(option:text-is('売マンション'))" },
-        { "by": "label", "value": "物件種別1" },
-        { "by": "name", "value": "bukkenShubetsu1" },
-        { "by": "css", "value": "select[name*='shubetsu']" }
+        {
+          "by": "css",
+          "value": "select:has(option:text-is('{{shubetsu1}}'))"
+        },
+        {
+          "by": "label",
+          "value": "物件種別1"
+        },
+        {
+          "by": "name",
+          "value": "bukkenShubetsu1"
+        },
+        {
+          "by": "css",
+          "value": "select[name*='shubetsu']"
+        }
       ],
-      "note": "『売マンション』という選択肢を持つ<select>を直接狙う。.first で物件種別1を選ぶ。"
+      "note": "選んだ種別の選択肢を持つ<select>を直接狙う。.first で物件種別1を選ぶ。",
+      "requires": [
+        "shubetsu1"
+      ]
     },
-
-    { "id": "ensen1_senro", "description": "沿線1 沿線名を入力（駅名がある場合は必須・完全一致）", "action": "fill", "value": "東海道線",
+    {
+      "id": "ensen1_senro",
+      "description": "沿線1 沿線名「{{ensen1_line}}」を入力（駅名がある場合は必須・完全一致）",
+      "action": "fill",
+      "value": "{{ensen1_line}}",
       "scroll_into_view": true,
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/preceding::input[1]" }
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[1]/preceding::input[1]"
+        }
       ],
-      "note": "駅名ラベルの直前のinput=沿線名。正式表記が違えばvalueを変更（完全一致のため）。" },
-    { "id": "ensen1_start_eki", "description": "沿線1 始駅「甲子園口」を入力", "action": "fill", "value": "甲子園口",
+      "note": "駅名ラベルの直前のinput=沿線名。正式表記が違えばvalueを変更（完全一致のため）。",
+      "requires": [
+        "ensen1_line"
+      ]
+    },
+    {
+      "id": "ensen1_start_eki",
+      "description": "沿線1 始駅「{{ensen1_start}}」を入力",
+      "action": "fill",
+      "value": "{{ensen1_start}}",
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/following::input[1]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[2]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線１']/following::input[2]" }
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[1]/following::input[1]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線1']/following::input[2]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線１']/following::input[2]"
+        }
       ],
-      "note": "『駅名』ラベルは沿線欄だけにある目印。(駅名ラベル1つ目)の次のinput[1]=始駅。沿線名は完全一致リスク回避のため未入力。" },
-    { "id": "ensen1_end_eki", "description": "沿線1 終駅「さくら夙川」を入力", "action": "fill", "value": "さくら夙川",
+      "requires": [
+        "ensen1_start"
+      ]
+    },
+    {
+      "id": "ensen1_end_eki",
+      "description": "沿線1 終駅「{{ensen1_end}}」を入力",
+      "action": "fill",
+      "value": "{{ensen1_end}}",
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/following::input[2]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[3]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線１']/following::input[3]" }
-      ] },
-    { "id": "ensen1_walk", "description": "沿線1 駅から徒歩に 10 を入力", "action": "fill", "value": "10",
-      "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/following::input[3]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::input[4]" }
-      ] },
-    { "id": "ensen1_walk_unit", "description": "沿線1 徒歩の単位を「分」に", "action": "select", "value": "分", "optional": true,
-      "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[1]/following::select[1]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線1']/following::select[1]" }
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[1]/following::input[2]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線1']/following::input[3]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線１']/following::input[3]"
+        }
       ],
-      "note": "単位プルダウン。既定が分なら失敗しても続行(optional)。" },
-
-    { "id": "ensen2_senro", "description": "沿線2 沿線名を入力（駅名がある場合は必須・完全一致）", "action": "fill", "value": "阪急神戸線",
+      "requires": [
+        "ensen1_end"
+      ]
+    },
+    {
+      "id": "ensen1_walk",
+      "description": "沿線1 駅から徒歩に {{ensen1_walk}} を入力",
+      "action": "fill",
+      "value": "{{ensen1_walk}}",
+      "targets": [
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[1]/following::input[3]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線1']/following::input[4]"
+        }
+      ],
+      "requires": [
+        "ensen1_walk"
+      ]
+    },
+    {
+      "id": "ensen1_walk_unit",
+      "description": "沿線1 徒歩の単位を「分」に",
+      "action": "select",
+      "value": "分",
+      "optional": true,
+      "targets": [
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[1]/following::select[1]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線1']/following::select[1]"
+        }
+      ],
+      "note": "単位プルダウン。既定が分なら失敗しても続行(optional)。",
+      "requires": [
+        "ensen1_walk"
+      ]
+    },
+    {
+      "id": "ensen2_senro",
+      "description": "沿線2 沿線名「{{ensen2_line}}」を入力（駅名がある場合は必須・完全一致）",
+      "action": "fill",
+      "value": "{{ensen2_line}}",
       "scroll_into_view": true,
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/preceding::input[1]" }
-      ] },
-    { "id": "ensen2_start_eki", "description": "沿線2 始駅「西宮北口」を入力", "action": "fill", "value": "西宮北口",
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[2]/preceding::input[1]"
+        }
+      ],
+      "requires": [
+        "ensen2_line"
+      ]
+    },
+    {
+      "id": "ensen2_start_eki",
+      "description": "沿線2 始駅「{{ensen2_start}}」を入力",
+      "action": "fill",
+      "value": "{{ensen2_start}}",
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/following::input[1]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[2]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線２']/following::input[2]" }
-      ] },
-    { "id": "ensen2_end_eki", "description": "沿線2 終駅「夙川」を入力", "action": "fill", "value": "夙川",
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[2]/following::input[1]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線2']/following::input[2]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線２']/following::input[2]"
+        }
+      ],
+      "requires": [
+        "ensen2_start"
+      ]
+    },
+    {
+      "id": "ensen2_end_eki",
+      "description": "沿線2 終駅「{{ensen2_end}}」を入力",
+      "action": "fill",
+      "value": "{{ensen2_end}}",
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/following::input[2]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[3]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線２']/following::input[3]" }
-      ] },
-    { "id": "ensen2_walk", "description": "沿線2 駅から徒歩に 10 を入力", "action": "fill", "value": "10",
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[2]/following::input[2]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線2']/following::input[3]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線２']/following::input[3]"
+        }
+      ],
+      "requires": [
+        "ensen2_end"
+      ]
+    },
+    {
+      "id": "ensen2_walk",
+      "description": "沿線2 駅から徒歩に {{ensen2_walk}} を入力",
+      "action": "fill",
+      "value": "{{ensen2_walk}}",
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/following::input[3]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::input[4]" }
-      ] },
-    { "id": "ensen2_walk_unit", "description": "沿線2 徒歩の単位を「分」に", "action": "select", "value": "分", "optional": true,
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[2]/following::input[3]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線2']/following::input[4]"
+        }
+      ],
+      "requires": [
+        "ensen2_walk"
+      ]
+    },
+    {
+      "id": "ensen2_walk_unit",
+      "description": "沿線2 徒歩の単位を「分」に",
+      "action": "select",
+      "value": "分",
+      "optional": true,
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[2]/following::select[1]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線2']/following::select[1]" }
-      ] },
-
-    { "id": "ensen3_senro", "description": "沿線3 沿線名を入力（駅名がある場合は必須・完全一致）", "action": "fill", "value": "阪神本線",
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[2]/following::select[1]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線2']/following::select[1]"
+        }
+      ],
+      "requires": [
+        "ensen2_walk"
+      ]
+    },
+    {
+      "id": "ensen3_senro",
+      "description": "沿線3 沿線名「{{ensen3_line}}」を入力（駅名がある場合は必須・完全一致）",
+      "action": "fill",
+      "value": "{{ensen3_line}}",
       "scroll_into_view": true,
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/preceding::input[1]" }
-      ] },
-    { "id": "ensen3_start_eki", "description": "沿線3 始駅「甲子園」を入力", "action": "fill", "value": "甲子園",
-      "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/following::input[1]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[2]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線３']/following::input[2]" }
-      ] },
-    { "id": "ensen3_end_eki", "description": "沿線3 終駅「香櫨園」を入力", "action": "fill", "value": "香櫨園",
-      "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/following::input[2]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[3]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線３']/following::input[3]" }
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[3]/preceding::input[1]"
+        }
       ],
-      "note": "ご指示『香露園』は実在駅『香櫨園』と解釈。違えば value を変更。" },
-    { "id": "ensen3_walk", "description": "沿線3 駅から徒歩に 10 を入力", "action": "fill", "value": "10",
+      "requires": [
+        "ensen3_line"
+      ]
+    },
+    {
+      "id": "ensen3_start_eki",
+      "description": "沿線3 始駅「{{ensen3_start}}」を入力",
+      "action": "fill",
+      "value": "{{ensen3_start}}",
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/following::input[3]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::input[4]" }
-      ] },
-    { "id": "ensen3_walk_unit", "description": "沿線3 徒歩の単位を「分」に", "action": "select", "value": "分", "optional": true,
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[3]/following::input[1]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線3']/following::input[2]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線３']/following::input[2]"
+        }
+      ],
+      "requires": [
+        "ensen3_start"
+      ]
+    },
+    {
+      "id": "ensen3_end_eki",
+      "description": "沿線3 終駅「{{ensen3_end}}」を入力",
+      "action": "fill",
+      "value": "{{ensen3_end}}",
       "targets": [
-        { "by": "xpath", "value": "(//*[contains(text(),'駅名')])[3]/following::select[1]" },
-        { "by": "xpath", "value": "//*[normalize-space()='沿線3']/following::select[1]" }
-      ] },
-
-    { "id": "dump_after_ensen", "description": "（診断）沿線入力後の画面HTMLを保存（価格欄の構造把握用）", "action": "dump_html", "optional": true },
-    { "id": "scroll_to_price", "description": "価格欄まで下方向にスクロール", "action": "scroll", "value": 500 },
-    { "id": "price_min", "description": "価格の下限に 3000（万円）を入力", "action": "fill", "value": "3000",
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[3]/following::input[2]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線3']/following::input[3]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線３']/following::input[3]"
+        }
+      ],
+      "requires": [
+        "ensen3_end"
+      ]
+    },
+    {
+      "id": "ensen3_walk",
+      "description": "沿線3 駅から徒歩に {{ensen3_walk}} を入力",
+      "action": "fill",
+      "value": "{{ensen3_walk}}",
+      "targets": [
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[3]/following::input[3]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線3']/following::input[4]"
+        }
+      ],
+      "requires": [
+        "ensen3_walk"
+      ]
+    },
+    {
+      "id": "ensen3_walk_unit",
+      "description": "沿線3 徒歩の単位を「分」に",
+      "action": "select",
+      "value": "分",
+      "optional": true,
+      "targets": [
+        {
+          "by": "xpath",
+          "value": "(//*[contains(text(),'駅名')])[3]/following::select[1]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='沿線3']/following::select[1]"
+        }
+      ],
+      "requires": [
+        "ensen3_walk"
+      ]
+    },
+    {
+      "id": "dump_after_ensen",
+      "description": "（診断）沿線入力後の画面HTMLを保存（価格欄の構造把握用）",
+      "action": "dump_html",
+      "optional": true
+    },
+    {
+      "id": "scroll_to_price",
+      "description": "価格欄まで下方向にスクロール",
+      "action": "scroll",
+      "value": 500
+    },
+    {
+      "id": "price_min",
+      "description": "価格の下限に {{price_min}}（万円）を入力",
+      "action": "fill",
+      "value": "{{price_min}}",
       "scroll_into_view": true,
       "targets": [
-        { "by": "xpath", "value": "//*[normalize-space()='価格']/following::input[1]" },
-        { "by": "xpath", "value": "//*[normalize-space()='価格(万円)']/following::input[1]" },
-        { "by": "name", "value": "priceLow" },
-        { "by": "name", "value": "priceMin" }
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='価格']/following::input[1]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='価格(万円)']/following::input[1]"
+        },
+        {
+          "by": "name",
+          "value": "priceLow"
+        },
+        {
+          "by": "name",
+          "value": "priceMin"
+        }
       ],
-      "note": "見つからなければ手前のdump_after_ensenのHTMLで価格欄の構造を確認して調整。ここで止まっても未指定検索を防ぐため必須(非optional)。" },
-    { "id": "price_max", "description": "価格の上限に 7000（万円）を入力", "action": "fill", "value": "7000",
+      "note": "価格欄の構造は dump_after_ensen のHTMLで確認できる。空欄なら省略。",
+      "requires": [
+        "price_min"
+      ]
+    },
+    {
+      "id": "price_max",
+      "description": "価格の上限に {{price_max}}（万円）を入力",
+      "action": "fill",
+      "value": "{{price_max}}",
       "targets": [
-        { "by": "xpath", "value": "//*[normalize-space()='価格']/following::input[2]" },
-        { "by": "xpath", "value": "//*[normalize-space()='価格(万円)']/following::input[2]" },
-        { "by": "name", "value": "priceHigh" },
-        { "by": "name", "value": "priceMax" }
-      ] },
-
-    { "id": "click_search", "description": "「検索」ボタン（右下・緑）をクリック", "action": "click",
-      "targets": [ { "by": "role", "value": "検索", "options": { "role": "button" } }, { "by": "text", "value": "検索する" }, { "by": "text", "value": "検索" }, { "by": "css", "value": "button[type='submit']" } ],
-      "note": "色や位置ではなくボタン名で特定します。名称が違えばtargetsを調整。" },
-    { "id": "wait_results", "description": "検索結果の表示を待つ", "action": "wait_ms", "value": 3000 },
-    { "id": "dump_results", "description": "（診断）結果画面のHTMLを保存", "action": "dump_html", "optional": true },
-    { "id": "select_all_in_page", "description": "「ページ内全選択」をクリック", "action": "click",
-      "targets": [ { "by": "role", "value": "ページ内全選択", "options": { "role": "button" } }, { "by": "text", "value": "ページ内全選択" }, { "by": "text", "value": "全選択" } ] },
-    { "id": "click_zumen_ikkatsu", "description": "「図面の一括取得」をクリック", "action": "click",
-      "targets": [ { "by": "role", "value": "図面一括取得", "options": { "role": "button" } }, { "by": "text", "value": "図面の一括取得" }, { "by": "text", "value": "図面一括取得" } ] },
-    { "id": "wait_dialog", "description": "確認ポップアップの表示を待つ", "action": "wait_ms", "value": 1500 },
-    { "id": "dialog_ikkatsu", "description": "ポップアップ内の「一括取得」を押して図面をダウンロード保存", "action": "click_download",
-      "targets": [
-        { "by": "css", "value": ".modal.show button:text-is('一括取得')" },
-        { "by": "css", "value": ".modal.show >> text=一括取得" },
-        { "by": "role", "value": "一括取得", "options": { "role": "button", "exact": true } },
-        { "by": "text", "value": "一括取得", "options": { "exact": true } }
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='価格']/following::input[2]"
+        },
+        {
+          "by": "xpath",
+          "value": "//*[normalize-space()='価格(万円)']/following::input[2]"
+        },
+        {
+          "by": "name",
+          "value": "priceHigh"
+        },
+        {
+          "by": "name",
+          "value": "priceMax"
+        }
       ],
-      "note": "click_download=クリック前にダウンロードを予約(expect_download)して確保し、REINSがウィンドウを閉じる前に downloads フォルダへ保存する。" },
-    { "id": "wait_download", "description": "図面ダウンロードの後処理を待つ", "action": "wait_ms", "value": 3000 }
+      "requires": [
+        "price_max"
+      ]
+    },
+    {
+      "id": "click_search",
+      "description": "「検索」ボタン（右下・緑）をクリック",
+      "action": "click",
+      "targets": [
+        {
+          "by": "role",
+          "value": "検索",
+          "options": {
+            "role": "button"
+          }
+        },
+        {
+          "by": "text",
+          "value": "検索する"
+        },
+        {
+          "by": "text",
+          "value": "検索"
+        },
+        {
+          "by": "css",
+          "value": "button[type='submit']"
+        }
+      ],
+      "note": "色や位置ではなくボタン名で特定します。名称が違えばtargetsを調整。"
+    },
+    {
+      "id": "wait_results",
+      "description": "検索結果の表示を待つ",
+      "action": "wait_ms",
+      "value": 3000
+    },
+    {
+      "id": "dump_results",
+      "description": "（診断）結果画面のHTMLを保存",
+      "action": "dump_html",
+      "optional": true
+    },
+    {
+      "id": "select_all_in_page",
+      "description": "「ページ内全選択」をクリック",
+      "action": "click",
+      "targets": [
+        {
+          "by": "role",
+          "value": "ページ内全選択",
+          "options": {
+            "role": "button"
+          }
+        },
+        {
+          "by": "text",
+          "value": "ページ内全選択"
+        },
+        {
+          "by": "text",
+          "value": "全選択"
+        }
+      ]
+    },
+    {
+      "id": "click_zumen_ikkatsu",
+      "description": "「図面の一括取得」をクリック",
+      "action": "click",
+      "targets": [
+        {
+          "by": "role",
+          "value": "図面一括取得",
+          "options": {
+            "role": "button"
+          }
+        },
+        {
+          "by": "text",
+          "value": "図面の一括取得"
+        },
+        {
+          "by": "text",
+          "value": "図面一括取得"
+        }
+      ]
+    },
+    {
+      "id": "wait_dialog",
+      "description": "確認ポップアップの表示を待つ",
+      "action": "wait_ms",
+      "value": 1500
+    },
+    {
+      "id": "dialog_ikkatsu",
+      "description": "ポップアップ内の「一括取得」を押して図面をダウンロード保存",
+      "action": "click_download",
+      "targets": [
+        {
+          "by": "css",
+          "value": ".modal.show button:text-is('一括取得')"
+        },
+        {
+          "by": "css",
+          "value": ".modal.show >> text=一括取得"
+        },
+        {
+          "by": "role",
+          "value": "一括取得",
+          "options": {
+            "role": "button",
+            "exact": true
+          }
+        },
+        {
+          "by": "text",
+          "value": "一括取得",
+          "options": {
+            "exact": true
+          }
+        }
+      ],
+      "note": "click_download=クリック前にダウンロードを予約(expect_download)して確保し、REINSがウィンドウを閉じる前に downloads フォルダへ保存する。"
+    },
+    {
+      "id": "wait_download",
+      "description": "図面ダウンロードの後処理を待つ",
+      "action": "wait_ms",
+      "value": 3000
+    }
   ]
 }

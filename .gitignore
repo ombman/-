@@ -8,3 +8,6 @@ __pycache__/
 
 # 個人設定（URLや動作設定）。雛形の settings.example.json のみ共有します。
 config/settings.json
+
+# 検索条件（起動時の条件画面で保存）。更新で上書きされないよう共有しません。
+config/search_conditions.json
