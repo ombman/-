@@ -104,6 +104,42 @@ LOGIN_ERROR_MARKERS = [
 ]
 
 
+# ログイン画面の入力欄が出るまで待つ時間（1回あたり）と、再読み込みの回数
+PAGE_LOAD_WAIT_MS = 60000
+PAGE_RELOAD_TIMES = 2
+
+
+def _wait_login_form(page) -> None:
+    """
+    ログイン画面の入力欄が表示されるまで待ちます。
+    REINSが混雑している時など、画面が真っ白のまま止まることがあるため、
+    出なければ再読み込みしてやり直します。それでも出なければ LoginError。
+    """
+    log = get_logger()
+    form = page.locator("input:not([type='hidden'])").first
+    for attempt in range(PAGE_RELOAD_TIMES + 1):
+        try:
+            form.wait_for(state="visible", timeout=PAGE_LOAD_WAIT_MS)
+            return
+        except Exception:
+            screenshot(page, f"01_login_blank_{attempt + 1}")
+            if attempt >= PAGE_RELOAD_TIMES:
+                break
+            log.warning(
+                "ログイン画面が%d秒たっても表示されません。再読み込みします（%d/%d回目）。",
+                PAGE_LOAD_WAIT_MS // 1000, attempt + 1, PAGE_RELOAD_TIMES,
+            )
+            try:
+                page.reload(wait_until="domcontentloaded", timeout=PAGE_LOAD_WAIT_MS)
+            except Exception as exc:
+                log.warning("再読み込みに失敗しました（続行）: %s", exc)
+    raise LoginError(
+        "REINSのログイン画面が表示されませんでした（画面が真っ白のまま）。\n"
+        "REINSの混雑・メンテナンス・ネット接続の不調が考えられます。\n"
+        "しばらく時間をおいてから、もう一度アイコンをダブルクリックしてください。"
+    )
+
+
 def login(page, login_url: str, creds: Credentials, timeout_ms: int) -> None:
     """
     REINSへログインします。成功時は正常終了、失敗時は LoginError を送出します。
@@ -115,9 +151,10 @@ def login(page, login_url: str, creds: Credentials, timeout_ms: int) -> None:
             "REINSのログインURLが設定されていません。設定画面またはconfig/settings.jsonで指定してください。"
         )
 
-    # 1) ログインページを開く
+    # 1) ログインページを開く（画面が真っ白のまま出ない時は再読み込みする）
     log.info("REINSのログインページを開きます: %s", login_url)
-    page.goto(login_url, wait_until="domcontentloaded", timeout=timeout_ms)
+    page.goto(login_url, wait_until="domcontentloaded", timeout=max(timeout_ms, PAGE_LOAD_WAIT_MS))
+    _wait_login_form(page)
     screenshot(page, "01_login_page")
 
     # 2) ID・パスワードを入力（値はログに出さない）
