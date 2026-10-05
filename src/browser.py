@@ -159,6 +159,8 @@ class BrowserSession:
         try:
             if self._context is not None:
                 self._context.close()
+        except Exception as close_exc:  # 人がChromeを先に閉じた場合など
+            log.debug("ブラウザ終了時の後始末で例外（無視）: %s", close_exc)
         finally:
             if self._pw is not None:
                 self._pw.stop()

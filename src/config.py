@@ -91,4 +91,8 @@ def _default_settings() -> dict[str, Any]:
         "credential_service": "reins-auto-search",
         # 操作の合間に確認のため一時停止するか（True にすると各ステップでEnter待ち）
         "step_by_step_pause": False,
+        # 検索後、保存した図面を掲載サイト（Wix）の管理画面のドロップ枠へ自動で渡すか
+        "wix_upload_enabled": False,
+        # 掲載サイト（物件紹介ページ）のURL。管理用パスワードは keyring に保存します
+        "wix_site_url": "",
     }

@@ -20,6 +20,7 @@ from tkinter import messagebox, ttk
 
 import config
 import credentials
+from wix_upload import WIX_CREDENTIAL_SERVICE, WIX_USERNAME
 
 
 def open_settings(require_credentials: bool = False) -> bool:
@@ -35,12 +36,12 @@ def open_settings(require_credentials: bool = False) -> bool:
     settings = config.load_settings()
     service = settings.get("credential_service", "reins-auto-search")
     existing = credentials.load_credentials(service)
+    wix_existing = credentials.load_credentials(WIX_CREDENTIAL_SERVICE)
 
     result = {"saved": False}
 
     root = tk.Tk()
     root.title("REINS自動検索アプリ 設定")
-    root.geometry("520x360")
     root.resizable(False, False)
 
     frm = ttk.Frame(root, padding=16)
@@ -81,13 +82,28 @@ def open_settings(require_credentials: bool = False) -> bool:
         frm, text="画面を表示せずに実行する（上級者向け／通常はオフ）", variable=headless_var
     ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
+    # --- 掲載サイト（Wix）への自動受け渡し ---
+    wix = ttk.LabelFrame(frm, text="掲載サイト（Wix）への自動受け渡し", padding=10)
+    wix.grid(row=8, column=0, columnspan=2, sticky="we", pady=(4, 10))
+    wix_on_var = tk.BooleanVar(value=bool(settings.get("wix_upload_enabled", False)))
+    ttk.Checkbutton(
+        wix, text="検索後、保存した図面を掲載サイトの管理画面のドロップ枠に自動で渡す", variable=wix_on_var
+    ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(wix, text="掲載サイト（物件紹介ページ）のURL").grid(row=1, column=0, sticky="w")
+    wix_url_var = tk.StringVar(value=settings.get("wix_site_url", ""))
+    ttk.Entry(wix, textvariable=wix_url_var, width=60).grid(row=2, column=0, sticky="we", pady=(0, 6))
+    wix_pw_label = "掲載サイトの管理用パスワード" + ("（保存済み。変更する場合のみ入力）" if wix_existing else "")
+    ttk.Label(wix, text=wix_pw_label).grid(row=3, column=0, sticky="w")
+    wix_pw_var = tk.StringVar(value="")
+    ttk.Entry(wix, textvariable=wix_pw_var, width=40, show="●").grid(row=4, column=0, sticky="w")
+
     # --- 説明 ---
     note = (
         "※ パスワードはこのアプリやファイルには保存されず、Windowsの資格情報\n"
         "　 マネージャー（安全な保管庫）に保存されます。画面にも表示しません。"
     )
     ttk.Label(frm, text=note, foreground="#555").grid(
-        row=8, column=0, columnspan=2, sticky="w", pady=(0, 12)
+        row=9, column=0, columnspan=2, sticky="w", pady=(0, 12)
     )
 
     def on_save():
@@ -106,10 +122,24 @@ def open_settings(require_credentials: bool = False) -> bool:
             messagebox.showwarning("入力エラー", "パスワードを入力してください。")
             return
 
+        wix_on = bool(wix_on_var.get())
+        wix_url = wix_url_var.get().strip()
+        wix_pw = wix_pw_var.get()
+        if wix_on and not wix_url.lower().startswith(("http://", "https://")):
+            messagebox.showwarning("入力エラー", "掲載サイトのURLを https:// から入力してください。")
+            return
+        if wix_on and not wix_pw and not wix_existing:
+            messagebox.showwarning("入力エラー", "掲載サイトの管理用パスワードを入力してください。")
+            return
+
         # 設定保存
         settings["login_url"] = url
         settings["headless"] = bool(headless_var.get())
+        settings["wix_upload_enabled"] = wix_on
+        settings["wix_site_url"] = wix_url
         config.save_settings(settings)
+        if wix_pw:
+            credentials.save_credentials(WIX_CREDENTIAL_SERVICE, WIX_USERNAME, wix_pw)
 
         # 認証情報保存（パスワード未入力かつ既存ありなら、IDだけ更新のためパスワードは既存を維持）
         if user:
@@ -134,7 +164,7 @@ def open_settings(require_credentials: bool = False) -> bool:
         root.destroy()
 
     btns = ttk.Frame(frm)
-    btns.grid(row=9, column=0, columnspan=2, sticky="e", pady=(4, 0))
+    btns.grid(row=10, column=0, columnspan=2, sticky="e", pady=(4, 0))
     ttk.Button(btns, text="保存して閉じる", command=on_save).pack(side="right", padx=4)
     ttk.Button(btns, text="キャンセル", command=on_cancel).pack(side="right", padx=4)
     ttk.Button(btns, text="ログイン情報を削除", command=on_delete).pack(side="left", padx=4)
