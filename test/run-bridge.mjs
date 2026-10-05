@@ -8,13 +8,13 @@ const ROOT='/home/user/-/wix-embed', FILE=process.env.WIDGET_FILE||'index.html';
 const HOST = `<!doctype html><meta charset="utf-8"><body>
 <iframe id="f" src="/${FILE}?mode=admin" style="width:1000px;height:800px"></iframe>
 <script>
-window.saved = []; window.delay = 0;
+window.saved = []; window.delay = 0; window.loginError = null;
 const f = document.getElementById('f');
 f.addEventListener('load', () => f.contentWindow.postMessage({ channel: 'reLp', action: 'setMode', payload: 'admin' }, '*'));
 window.addEventListener('message', ev => {
   const m = ev.data; if (!m || m.channel !== 'reLp' || !m.rid) return;
   const reply = b => f.contentWindow.postMessage(Object.assign({ channel: 'reLp', rid: m.rid }, b), '*');
-  if (m.action === 'login') return reply({ ok: true, token: 't' });
+  if (m.action === 'login') return reply(window.loginError ? { ok: false, error: window.loginError } : { ok: true, token: 't' });
   if (m.action === 'list') return reply({ ok: true, items: window.saved });
   if (m.action === 'save') {
     if (window.delay < 0) return;
@@ -59,6 +59,16 @@ const r2 = await fr.evaluate(async (rec) => {
 ok('時間切れはエラーになる', r2.ok === false && /時間切れ/.test(r2.err || ''), JSON.stringify(r2));
 const local2 = await fr.evaluate(()=>JSON.parse(localStorage.getItem('reLp.properties.v1')||'[]').length);
 ok('このブラウザ内に保存したことにしない', local2 === 0, '件数=' + local2);
+
+console.log('\n-- コピーしたサイト（パスワード未登録）では、登録のしかたを画面に出す');
+const NOPW = 'このサイトには管理パスワードが登録されていません。サイトをコピーした場合、パスワード（シークレット）はWixの仕様でコピーされません。Wixのダッシュボード →「開発ツール」→「シークレットマネージャー」で、名前「adminPassword」、値に管理パスワードを登録してから、もう一度ログインしてください。';
+await p.evaluate((m)=>{ window.loginError = m; }, NOPW);
+await fr.fill('#pw', 'anything'); await fr.click('#btnLogin');
+await fr.waitForFunction(() => document.getElementById('loginLog').textContent.length > 0, null, { timeout: 8000 }).catch(()=>{});
+const lg = await fr.evaluate(() => ({ log: document.getElementById('loginLog').textContent, inBody: !document.getElementById('adminBody').hidden }));
+ok('登録のしかたがそのまま表示される', lg.log.indexOf('adminPassword') >= 0 && lg.log.indexOf('シークレットマネージャー') >= 0, lg.log.slice(0, 60));
+ok('ログインはさせない', !lg.inBody, String(lg.inBody));
+await p.evaluate(()=>{ window.loginError = null; });
 
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();

@@ -3359,9 +3359,13 @@ var Store = {
       if (r && r.ok) { Store.mode = 'wix'; return { ok: true, token: r.token }; }
       if (r && !r.ok) return { ok: false, error: r.error || 'パスワードが違います' };
       Store.mode = 'local';
+      /* Wixのページコードとつながっていない（コピーしたサイトでページコードが無い等）ときは
+         簡易モードで確かめる。管理パスワードで入れない理由が分かるよう、そのことも伝える */
       return pw === CONFIG.FALLBACK_PASSWORD
         ? { ok: true, token: 'local' }
-        : { ok: false, error: 'パスワードが違います' };
+        : { ok: false, error: 'パスワードが違います。（このページはWixのサイトとつながっていないため、' +
+            '管理パスワードを確かめられません。このページのページコードと、バックエンドの properties.web.js が' +
+            '入っているか確認してください）' };
     });
   }
 };

@@ -12,8 +12,13 @@
  * 事前準備：
  *   1) CMS で「Properties」コレクションを作成（フィールドは docs/SETUP-ja.md 参照）
  *   2) シークレットマネージャーに以下を登録
- *        adminPassword   … 管理画面のログインパスワード
- *        adminTokenSalt  … 任意の長いランダム文字列（トークン署名用）
+ *        adminPassword   … 管理画面のログインパスワード（必須）
+ *        adminTokenSalt  … 任意の長いランダム文字列（トークン署名用・省略可）
+ *
+ * ※ サイトをコピー（複製）すると、シークレットマネージャーの中身はコピーされません
+ *    （Wixの仕様）。コピー先のサイトでは adminPassword を登録し直してください。
+ *    adminTokenSalt が無いときは adminPassword から署名用の鍵を作るので、
+ *    コピー先で登録が必要なのは adminPassword の1つだけです。
  */
 import wixData from 'wix-data';
 import { elevate } from 'wix-auth';
@@ -28,8 +33,26 @@ const elevatedRemove = elevate(wixData.remove);
 const elevatedQuery = elevate(wixData.query(COLLECTION).find);
 
 /* ---------- トークン ---------- */
+/* シークレットを読む。登録されていなければ null（コピーしたサイトでは空になる） */
+async function secretOrNull(name) {
+  try {
+    const v = await getSecret(name);
+    return v ? String(v) : null;
+  } catch (e) {
+    return null;
+  }
+}
+const NO_PASSWORD = 'このサイトには管理パスワードが登録されていません。' +
+  'サイトをコピーした場合、パスワード（シークレット）はWixの仕様でコピーされません。' +
+  'Wixのダッシュボード →「開発ツール」→「シークレットマネージャー」で、' +
+  '名前「adminPassword」、値に管理パスワードを登録してから、もう一度ログインしてください。';
 async function salt() {
-  return await getSecret('adminTokenSalt');
+  const s = await secretOrNull('adminTokenSalt');
+  if (s) return s;
+  /* adminTokenSalt が無いとき（コピーしたサイトなど）は、管理パスワードから署名用の鍵を作る */
+  const pw = await secretOrNull('adminPassword');
+  if (!pw) throw new Error(NO_PASSWORD);
+  return createHmac('sha256', 'reLp-token-key').update(pw).digest('hex');
 }
 function sign(payload, key) {
   return createHmac('sha256', key).update(payload).digest('hex');
@@ -56,7 +79,8 @@ export async function listProperties() {
 
 /* ---------- 管理 ---------- */
 export async function login(password) {
-  const expected = await getSecret('adminPassword');
+  const expected = await secretOrNull('adminPassword');
+  if (!expected) throw new Error(NO_PASSWORD);
   if (!password || password !== expected) throw new Error('パスワードが違います');
   return { token: await issueToken() };
 }
