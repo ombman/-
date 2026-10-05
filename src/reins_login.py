@@ -20,6 +20,8 @@ REINSへのログイン処理を担当するモジュールです。
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from app_logger import get_logger, screenshot
 from credentials import Credentials
 from locator import (
@@ -104,39 +106,72 @@ LOGIN_ERROR_MARKERS = [
 ]
 
 
-# ログイン画面の入力欄が出るまで待つ時間（1回あたり）と、再読み込みの回数
-PAGE_LOAD_WAIT_MS = 60000
-PAGE_RELOAD_TIMES = 2
+# ログイン画面の入力欄が出るまで待つ時間（ミリ秒）
+PAGE_LOAD_WAIT_MS = 30000
+PAGE_LOAD_WAIT_LAST_MS = 60000
 
 
-def _wait_login_form(page) -> None:
+def _clear_site_data(page, url: str) -> None:
+    """
+    このアプリ専用Chrome（.chrome-profile）に残ったREINSのサイトデータ
+    （Cookie・ローカル保存データ・キャッシュ・Service Worker）を消します。
+    ※ふだん使いのChromeのデータには影響しません。
+    """
+    log = get_logger()
+    parts = urlsplit(url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    try:
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Storage.clearDataForOrigin", {"origin": origin, "storageTypes": "all"})
+        cdp.send("Network.clearBrowserCache")
+        cdp.detach()
+    except Exception as exc:
+        log.warning("サイトデータの削除に失敗（続行）: %s", exc)
+    try:
+        page.context.clear_cookies()
+    except Exception as exc:
+        log.warning("Cookieの削除に失敗（続行）: %s", exc)
+    log.info("アプリ用ChromeのREINSサイトデータを削除しました: %s", origin)
+
+
+def _wait_login_form(page, login_url: str) -> None:
     """
     ログイン画面の入力欄が表示されるまで待ちます。
-    REINSが混雑している時など、画面が真っ白のまま止まることがあるため、
-    出なければ再読み込みしてやり直します。それでも出なければ LoginError。
+    読み込み中のくるくるのまま止まることがあるため、段階的に立て直します:
+        1回目: そのまま待つ → 2回目: 再読み込み → 3回目: 残ったサイトデータを消して開き直す
+    それでも出なければ LoginError。
     """
     log = get_logger()
     form = page.locator("input:not([type='hidden'])").first
-    for attempt in range(PAGE_RELOAD_TIMES + 1):
+    plans = [
+        ("wait", PAGE_LOAD_WAIT_MS),
+        ("reload", PAGE_LOAD_WAIT_MS),
+        ("clear", PAGE_LOAD_WAIT_LAST_MS),
+    ]
+    for attempt, (how, wait_ms) in enumerate(plans, start=1):
         try:
-            form.wait_for(state="visible", timeout=PAGE_LOAD_WAIT_MS)
+            if how == "reload":
+                log.warning("ログイン画面が表示されません。再読み込みします（%d/%d）。", attempt, len(plans))
+                page.reload(wait_until="domcontentloaded", timeout=wait_ms)
+            elif how == "clear":
+                log.warning(
+                    "ログイン画面が表示されません。保存済みのREINSサイトデータを消して開き直します（%d/%d）。",
+                    attempt, len(plans),
+                )
+                _clear_site_data(page, login_url)
+                page.goto(login_url, wait_until="domcontentloaded", timeout=wait_ms)
+            form.wait_for(state="visible", timeout=wait_ms)
+            if attempt > 1:
+                log.info("ログイン画面が表示されました（%d回目で回復）。", attempt)
             return
-        except Exception:
-            screenshot(page, f"01_login_blank_{attempt + 1}")
-            if attempt >= PAGE_RELOAD_TIMES:
-                break
-            log.warning(
-                "ログイン画面が%d秒たっても表示されません。再読み込みします（%d/%d回目）。",
-                PAGE_LOAD_WAIT_MS // 1000, attempt + 1, PAGE_RELOAD_TIMES,
-            )
-            try:
-                page.reload(wait_until="domcontentloaded", timeout=PAGE_LOAD_WAIT_MS)
-            except Exception as exc:
-                log.warning("再読み込みに失敗しました（続行）: %s", exc)
+        except Exception as exc:
+            log.debug("ログイン画面の待機に失敗（%s）: %s", how, exc)
+            screenshot(page, f"01_login_blank_{attempt}")
     raise LoginError(
-        "REINSのログイン画面が表示されませんでした（画面が真っ白のまま）。\n"
-        "REINSの混雑・メンテナンス・ネット接続の不調が考えられます。\n"
-        "しばらく時間をおいてから、もう一度アイコンをダブルクリックしてください。"
+        "REINSのログイン画面が表示されませんでした（読み込み中のまま）。\n"
+        "ふだん使いのChromeでREINSのログイン画面が開けるか確認してください。\n"
+        "・ふだんのChromeでも開けない → REINS側の不調です。時間をおいて再実行してください。\n"
+        "・ふだんのChromeでは開ける → このメッセージの画面写真を担当者に送ってください。"
     )
 
 
@@ -154,7 +189,7 @@ def login(page, login_url: str, creds: Credentials, timeout_ms: int) -> None:
     # 1) ログインページを開く（画面が真っ白のまま出ない時は再読み込みする）
     log.info("REINSのログインページを開きます: %s", login_url)
     page.goto(login_url, wait_until="domcontentloaded", timeout=max(timeout_ms, PAGE_LOAD_WAIT_MS))
-    _wait_login_form(page)
+    _wait_login_form(page, login_url)
     screenshot(page, "01_login_page")
 
     # 2) ID・パスワードを入力（値はログに出さない）
