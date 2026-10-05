@@ -1,7 +1,9 @@
 """
 build_release.py
 ================
-配布用ZIP（dist/REINS-auto-search.zip）を作ります。
+配布用ZIP（download/REINS-auto-search.zip）を作ります。
+ホームページのダウンロードボタンはこのファイルのURLを指しているので、
+アプリを更新したらこれを実行してZIPも作り直し、コミットしてください。
 
     python tools/build_release.py
 
@@ -16,7 +18,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DIST = ROOT / "dist"
+DIST = ROOT / "download"
 TOP = "REINS-auto-search"
 ZIP_PATH = DIST / f"{TOP}.zip"
 
