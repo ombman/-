@@ -15,12 +15,14 @@ echo ============================================================
 
 echo.
 echo [1/4] Checking Python...
-rem Prefer "python" (worked before on this PC); use "py -3" only as backup.
+rem Prefer "python"; use "py -3" only as backup.
+rem Each command is actually run (not just "where"), because Windows has a
+rem fake "python" (Microsoft Store shortcut) that exists but cannot run.
 set "PYCMD="
 set "PYALT="
-where python >nul 2>&1 && set "PYCMD=python"
-if not defined PYCMD ( where py >nul 2>&1 && set "PYCMD=py -3" )
-if /I not "%PYCMD%"=="py -3" ( where py >nul 2>&1 && set "PYALT=py -3" )
+python -c "import venv" >nul 2>&1 && set "PYCMD=python"
+if not defined PYCMD ( py -3 -c "import venv" >nul 2>&1 && set "PYCMD=py -3" )
+if /I not "%PYCMD%"=="py -3" ( py -3 -c "import venv" >nul 2>&1 && set "PYALT=py -3" )
 if not defined PYCMD (
     echo.
     echo [ERROR] Python was not found.
@@ -89,6 +91,8 @@ echo  Next step: double-click run.bat to start the app.
 echo ============================================================
 
 :done
+rem install.bat sets REINS_NO_PAUSE=1 so the installer keeps going.
+if "%REINS_NO_PAUSE%"=="1" exit /b %RC%
 echo.
 echo ------------------------------------------------------------
 echo  This window will stay open. Press any key to close it.
