@@ -22,7 +22,21 @@ window.addEventListener('message', ev => {
   }
 });
 </script>`;
+const HOST2 = `<!doctype html><meta charset="utf-8"><body>
+<iframe id="f" src="/${FILE}?mode=admin" style="width:1000px;height:800px"></iframe>
+<script>
+/* 合図（setMode）はiframeの準備前に送られて届かず、バックエンドの初回の返事に6秒かかるサイト */
+const f = document.getElementById('f');
+window.addEventListener('message', ev => {
+  const m = ev.data; if (!m || m.channel !== 'reLp' || !m.rid) return;
+  const reply = b => f.contentWindow.postMessage(Object.assign({ channel: 'reLp', rid: m.rid }, b), '*');
+  if (m.action === 'login') return setTimeout(() => reply(m.payload.password === 'pw' ? { ok: true, token: 't' } : { ok: false, error: 'パスワードが違います' }), 6000);
+  if (m.action === 'list') return setTimeout(() => reply({ ok: true, items: [] }), 6000);
+  reply({ ok: false, error: '不明な操作です' });
+});
+</script>`;
 const srv=http.createServer((q,r)=>{const url=q.url.split('?')[0];
+  if(url==='/host2.html'){r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return r.end(HOST2);}
   if(url==='/host.html'){r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});return r.end(HOST);}
   const f=path.join(ROOT,url==='/'?FILE:url); if(!fs.existsSync(f)){r.writeHead(404);return r.end()}
   r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});r.end(fs.readFileSync(f));});
@@ -69,6 +83,18 @@ const lg = await fr.evaluate(() => ({ log: document.getElementById('loginLog').t
 ok('登録のしかたがそのまま表示される', lg.log.indexOf('adminPassword') >= 0 && lg.log.indexOf('シークレットマネージャー') >= 0, lg.log.slice(0, 60));
 ok('ログインはさせない', !lg.inBody, String(lg.inBody));
 await p.evaluate(()=>{ window.loginError = null; });
+
+console.log('\n-- バックエンドの起動が遅いサイトでも、Wixにつながってログインできる');
+const p2=await (await b.newContext()).newPage();
+p2.on('pageerror',e=>console.log('PAGEERROR',e.message));
+await p2.goto('http://127.0.0.1:8307/host2.html');
+const fr2 = await (await p2.waitForSelector('#f')).contentFrame();
+await fr2.waitForFunction(()=>!!window.__RE);
+await fr2.fill('#pw', 'pw'); await fr2.click('#btnLogin');
+await fr2.waitForFunction(() => !document.getElementById('adminBody').hidden || document.getElementById('loginLog').textContent.length > 0, null, { timeout: 20000 }).catch(()=>{});
+const st2 = await fr2.evaluate(() => ({ inBody: !document.getElementById('adminBody').hidden, log: document.getElementById('loginLog').textContent, badge: document.getElementById('modeBadge').textContent, mode: window.__RE.Store.mode }));
+ok('6秒かかってもログインできる（標準モードにならない）', st2.inBody && st2.mode === 'wix', JSON.stringify(st2));
+ok('「Wix CMS 接続中」と表示される', /接続中/.test(st2.badge), st2.badge);
 
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();

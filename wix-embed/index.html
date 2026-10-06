@@ -3223,8 +3223,15 @@ var Bridge = (function () {
       try { window.parent.postMessage({ channel: 'reLp', rid: rid, action: action, payload: payload }, '*'); }
       catch (e) { return resolve(null); }
       var wait = connected === true ? CONFIG.BRIDGE_SAVE_TIMEOUT_MS : CONFIG.BRIDGE_TIMEOUT_MS;
-      setTimeout(function () {
+      var t0 = Date.now();
+      setTimeout(function check() {
         if (done) return;
+        /* 待っている間に、ページコードがあると分かった（合図の返事が来た）ときは、
+           バックエンドの返事を待ち続ける。サイトの初回の呼び出しは起動に数秒かかり、
+           4秒で打ち切ると、Wixにつながっているのに「標準モード」になってログインできなかった */
+        if (connected === true && Date.now() - t0 < CONFIG.BRIDGE_SAVE_TIMEOUT_MS) {
+          return setTimeout(check, Math.max(500, CONFIG.BRIDGE_SAVE_TIMEOUT_MS - (Date.now() - t0)));
+        }
         delete pending[rid];
         if (connected === true) {
           resolve({ ok: false, timeout: true, error: 'Wixからの応答がありませんでした（時間切れ）。通信状態を確かめて、もう一度掲載してください' });
@@ -3235,6 +3242,20 @@ var Bridge = (function () {
       }, wait);
     });
   }
+  /* ページコードがあるかを、バックエンドを使わない合図（ping）で確かめる。
+     どのページコードも知らない操作には必ず返事をする（「不明な操作です」）ので、返事が来れば
+     つながっている。ページコードの準備ができる前に送ると届かないので、少しの間くり返す */
+  (function probe() {
+    if (window.parent === window) return;
+    var tries = 0;
+    (function once() {
+      if (connected === true || tries++ >= 30) return;
+      var rid = 'p' + (++seq) + '_' + Date.now();
+      pending[rid] = function () { connected = true; };
+      try { window.parent.postMessage({ channel: 'reLp', rid: rid, action: 'ping' }, '*'); } catch (e) { return; }
+      setTimeout(function () { delete pending[rid]; once(); }, 400);
+    })();
+  })();
   return { call: call, isConnected: function () { return connected === true; } };
 })();
 
@@ -3364,8 +3385,8 @@ var Store = {
       return pw === CONFIG.FALLBACK_PASSWORD
         ? { ok: true, token: 'local' }
         : { ok: false, error: 'パスワードが違います。（このページはWixのサイトとつながっていないため、' +
-            '管理パスワードを確かめられません。このページのページコードと、バックエンドの properties.web.js が' +
-            '入っているか確認してください）' };
+            '管理パスワードを確かめられません。このページのページコードと、バックエンドのコード' +
+            '（aModule.jsw または properties.web.js）が入っているか確認してください）' };
     });
   }
 };
