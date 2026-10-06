@@ -87,7 +87,16 @@ export async function login(password) {
 
 export async function saveProperty(token, record) {
   await assertToken(token);
-  const saved = await elevatedInsert(COLLECTION, sanitize(record));
+  const item = sanitize(record);
+  let saved;
+  try {
+    saved = await elevatedInsert(COLLECTION, item);
+  } catch (e) {
+    /* Wixの内部エラーは画面に「Unable to handle the request」としか出ないため、
+       原因が分かるように中身を添えて返す（サイトのモニタリングログにも残す） */
+    console.error('saveProperty failed', e);
+    throw new Error(saveErrorMessage(e, item));
+  }
   return toClient(saved);
 }
 
@@ -95,6 +104,22 @@ export async function removeProperty(token, id) {
   await assertToken(token);
   await elevatedRemove(COLLECTION, id);
   return true;
+}
+
+/* 保存に失敗した理由を、管理画面に出せる日本語にする */
+function saveErrorMessage(e, item) {
+  const raw = String((e && (e.message || e.code)) || e || '');
+  const size = JSON.stringify(item).length;
+  if (/WDE0025|does not exist|存在しません/i.test(raw)) {
+    return 'CMSに「Properties」コレクションがありません。CMSで「Properties」という名前のコレクションを作成してください。（' + raw.slice(0, 120) + '）';
+  }
+  if (/WDE0027|permission|権限/i.test(raw)) {
+    return 'CMSの「Properties」コレクションに保存する権限がありません。コレクションの権限を確認してください。（' + raw.slice(0, 120) + '）';
+  }
+  if (/WDE0009|too large|size/i.test(raw) || size > 500000) {
+    return '1件のデータが大きすぎて保存できませんでした（約' + Math.round(size / 1024) + 'KB）。（' + raw.slice(0, 120) + '）';
+  }
+  return '保存に失敗しました：' + raw.slice(0, 200);
 }
 
 /* ---------- 変換 ---------- */
