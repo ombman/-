@@ -84,7 +84,7 @@ ok('Escで閉じる', !(await p.isVisible('#viewer')));
 await p.click('#btnPublishAll');
 await p.waitForFunction(()=>document.querySelectorAll('#pubGrid').length>0);
 await p.click('#toPublic'); await p.waitForTimeout(500);
-await p.click('#pubGrid .mk-wrap'); await p.waitForTimeout(300);
+await p.waitForTimeout(800); await p.click('#pubGrid .mk-wrap'); await p.waitForTimeout(300);
 ok('ユーザー画面のマイソクをクリックすると、マイソクが全画面になる', await p.isVisible('#viewer') && await p.isVisible('#viewerMk .mk-wrap'));
 await p.click('#viewerMk .mk-wrap'); await p.waitForTimeout(250);
 ok('全画面のマイソクを押すと、さらに拡大する', await p.evaluate(()=>document.getElementById('viewer').classList.contains('zoomed')));
