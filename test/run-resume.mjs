@@ -47,7 +47,7 @@ const first = await p1.evaluate(async () => {
   const names = Array.prototype.map.call(
     document.querySelectorAll('[data-f="name"]'), e => e.value);
   return { cards: document.querySelectorAll('[data-act="publish"]').length,
-           imgs: document.querySelectorAll('img.sheet-thumb').length, names };
+           imgs: document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length, names };
 });
 console.log(`\n1回目：確認カード ${first.cards}枚／資料画像 ${first.imgs}枚`);
 ok('資料を読み取れている', first.cards === 5, `${first.cards}枚`);
@@ -67,7 +67,7 @@ await p2.waitForFunction(() => document.querySelectorAll('[data-act="publish"]')
 
 const again = await p2.evaluate(() => ({
   cards: document.querySelectorAll('[data-act="publish"]').length,
-  imgs: document.querySelectorAll('img.sheet-thumb').length,
+  imgs: document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length,
   names: Array.prototype.map.call(document.querySelectorAll('[data-f="name"]'), e => e.value),
   log: (document.getElementById('dropLog').textContent||'').replace(/\s+/g,' ').trim(),
 }));
@@ -118,7 +118,7 @@ const mid = await p4.evaluate(async () => {
   }
   await new Promise(r=>setTimeout(r,1200));   /* 下書きの保管（まとめ書き）を待つ */
   const t = document.getElementById('dropLog').textContent;
-  return { log: t.replace(/\s+/g,' '), imgs: document.querySelectorAll('img.sheet-thumb').length,
+  return { log: t.replace(/\s+/g,' '), imgs: document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length,
            names: Array.prototype.map.call(document.querySelectorAll('[data-f="name"]'), e => e.value) };
 });
 console.log('\n途中で閉じる前:', mid.imgs + '枚の資料画像', mid.log.slice(-90));
@@ -141,7 +141,7 @@ const res5 = await p5.evaluate(async () => {
   await new Promise(r=>setTimeout(r,1500));
   return { log: document.getElementById('dropLog').textContent.replace(/\s+/g,' '),
            cards: document.querySelectorAll('[data-act="publish"]').length,
-           imgs: document.querySelectorAll('img.sheet-thumb').length,
+           imgs: document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length,
            names: Array.prototype.map.call(document.querySelectorAll('[data-f="name"]'), e => e.value),
            pending: window.__RE.__drafts ? window.__RE.__drafts().filter(d => /途中/.test(d.why)).length : -1 };
 });

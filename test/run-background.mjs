@@ -54,13 +54,13 @@ const r = await p.evaluate(async () => {
     if (m) lastProg = Number(m[1]);
     if (txt.indexOf('作成しました') >= 0) {
       return { done: true, ms: Date.now()-t0, lastProg,
-               imgs: document.querySelectorAll('img.sheet-thumb').length,
+               imgs: document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length,
                raf: window.__rafCalls };
     }
     await new Promise(r=>setTimeout(r,200));
   }
   return { done: false, ms: Date.now()-t0, lastProg,
-           imgs: document.querySelectorAll('img.sheet-thumb').length,
+           imgs: document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length,
            raf: window.__rafCalls,
            log: (document.getElementById('dropLog').textContent||'').replace(/\s+/g,' ').slice(-120) };
 });

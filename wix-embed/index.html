@@ -166,6 +166,16 @@ table.list td.num{text-align:right;white-space:nowrap}
   bottom:calc(8px + env(safe-area-inset-bottom,0px));
   text-align:center;color:#e7edf3;font-size:12.5px;pointer-events:none}
 .sheet-thumb{cursor:zoom-in}
+/* マイソク（Canvaのデザインに資料の値を載せた掲載用チラシ）。1123×794 の座標で組み、表示幅に合わせて縮める */
+.mk-wrap{position:relative;width:100%;aspect-ratio:1123/794;overflow:hidden;border-radius:8px;background:#fff;cursor:zoom-in}
+.mk{position:absolute;left:0;top:0;width:1123px;height:794px;transform-origin:0 0;background:#fff no-repeat 0 0/1123px 794px;
+  font-family:inherit;color:#1a1a1a}
+.mk .f{position:absolute;display:flex;align-items:center;white-space:nowrap;overflow:hidden;line-height:1.15;box-sizing:border-box}
+.mk .f.r{justify-content:flex-end}.mk .f.c{justify-content:center}
+.mk .f.w{color:#fff;font-weight:700}
+.mk .f.multi{white-space:pre-wrap;align-items:flex-start;line-height:1.5;overflow:hidden}
+.mk img.mk-sheet{position:absolute;object-fit:contain;background:#fff;cursor:zoom-in}
+.viewer .mk-big{width:min(96vw,calc(92vh * 1123 / 794));max-width:1400px}
 textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;resize:vertical}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:var(--accent);
   border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
@@ -207,6 +217,7 @@ textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--
         <option value="">すべての種別</option>
         <option value="house">戸建</option>
         <option value="mansion">マンション／区分所有</option>
+        <option value="land">土地</option>
       </select>
       <select id="fSort" aria-label="並び替え">
         <option value="new">新着順</option>
@@ -242,6 +253,7 @@ textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--
 <div class="viewer" id="viewer" hidden>
   <button class="close" id="viewerClose" type="button" aria-label="閉じる">×</button>
   <img id="viewerImg" alt="掲載資料">
+  <div id="viewerMk" class="mk-big" hidden></div>
   <div class="cap">画像をクリックで拡大／縮小　　Esc または × で閉じる</div>
 </div>
 
@@ -1400,6 +1412,142 @@ function pickDetails(t) {
   return out;
 }
 
+/* 3-7b. マイソク（掲載用のチラシ）に転記する項目
+   資料の「所在地」「用途地域」「建ぺい率」などの見出しの後ろにある値を読む。
+   読めない項目は空欄のまま（推測で埋めない）。確認画面で手直しできる。 */
+var EXTRA_KEYS = ['address', 'line', 'layout', 'structure', 'floors', 'floorOn', 'roomNo', 'floorAreas',
+  'landCategory', 'coverage', 'far', 'zoning', 'parking', 'status', 'rights', 'handover',
+  'mgmtFee', 'repairFee', 'developer', 'manager', 'roadType', 'roadAccess', 'terrain',
+  'privateRoad', 'buildCondition', 'notes', 'points', 'expiry'];
+var EXTRA_LABEL = {
+  address: '所在地', line: '路線（例：阪神本線）', layout: '間取り', structure: '建物構造',
+  floors: '規模（例：2階建）', floorOn: '所在階（例：6階）', roomNo: '部屋番号（例：403）',
+  floorAreas: '各階床面積', landCategory: '地目', coverage: '建ぺい率（％）', far: '容積率（％）',
+  zoning: '用途地域', parking: '駐車場', status: '現況', rights: '権利', handover: '引渡時期',
+  mgmtFee: '管理費（円/月）', repairFee: '修繕積立金（円/月）', developer: '分譲会社', manager: '管理会社',
+  roadType: '道路種別', roadAccess: '接道状況', terrain: '地勢', privateRoad: '私道負担',
+  buildCondition: '建築条件', notes: '備考', points: 'おすすめポイント', expiry: '取引条件有効期限'
+};
+/* 種別ごとに、マイソクに載る項目 */
+var EXTRA_BY_TYPE = {
+  house: ['address', 'line', 'layout', 'floors', 'structure', 'floorAreas', 'landCategory', 'coverage', 'far',
+          'zoning', 'parking', 'status', 'rights', 'handover', 'notes', 'points', 'expiry'],
+  mansion: ['roomNo', 'address', 'line', 'layout', 'mgmtFee', 'repairFee', 'structure', 'floors', 'floorOn',
+            'parking', 'coverage', 'far', 'zoning', 'developer', 'manager', 'status', 'rights', 'handover',
+            'points', 'expiry'],
+  land: ['address', 'line', 'roadType', 'roadAccess', 'terrain', 'zoning', 'status', 'privateRoad', 'rights',
+         'buildCondition', 'handover', 'coverage', 'far', 'notes']
+};
+var ZONES = ['第一種低層住居専用地域', '第二種低層住居専用地域', '第一種中高層住居専用地域', '第二種中高層住居専用地域',
+  '第一種住居地域', '第二種住居地域', '準住居地域', '田園住居地域', '近隣商業地域', '商業地域',
+  '準工業地域', '工業専用地域', '工業地域'];
+/* 値の終わり：次の見出し・行頭記号・広い空白 */
+var EXTRA_STOP = /[ \t]{2,}|　|[●◆■□◎★☆※|｜]|(?:所\s*在\s*地|交\s*通|価\s*格|間\s*取|専有面積|延床面積|土地面積|建物面積|築\s*年|構\s*造|用途地域|建[ぺ蔽]い?率|容積率|地\s*目|権\s*利|現\s*況|引\s*渡|駐車場|管理費|修繕|総戸数|備\s*考|接\s*道|私道|地\s*勢|建築条件|分譲会社|施工会社|管理会社|管理形態|管理方式|取引態様|道路種別|最寄|設\s*備|総区画|敷地面積|バルコニー|規模|所在階)/;
+function extraClean(v, max) {
+  if (v == null) return null;
+  v = String(v).replace(/^[\s　:：・\/／|｜=＝]+/, '').split(EXTRA_STOP)[0]
+    .replace(/[\s　:：・、。,（(]+$/, '').trim();
+  if (!v || v.indexOf(MASK) >= 0) return null;
+  /* 連絡先が混じる値は載せない */
+  if (/[0-9]{2,4}[-ー－][0-9]{2,4}[-ー－][0-9]{3,4}|@|https?:|www\.|TEL|FAX/i.test(v)) return null;
+  return v.slice(0, max || 30) || null;
+}
+function labelValue(s, label, max) {
+  var m = s.match(new RegExp('(?:' + label + ')[\\s　]*[:：／/]?[\\s　]*([^\\n]{1,60})'));
+  return m ? extraClean(m[1], max) : null;
+}
+function pickLandArea(t) {
+  var s = zen2han(t).replace(/([0-9]),([0-9]{3})/g, '$1$2');
+  var m = s.match(/(?:土地面積|敷地面積|土\s*地|地\s*積)[^0-9\n]{0,14}([0-9]+(?:\.[0-9]+)?)\s*(?:㎡|m2|m²|平米|平方メートル)/);
+  if (!m) return null;
+  var v = Number(m[1]);
+  return v >= 10 && v <= 100000 ? v : null;
+}
+function pickExtras(t, rec) {
+  var s = zen2han(String(t || '')).replace(/\r/g, '');
+  s = s.replace(/酉宮/g, '西宮').replace(/兵[庵康唐]県/g, '兵庫県').replace(/([ァ-ヶ])[-一－]([ァ-ヶ])/g, '$1ー$2');
+  var x = {};
+  /* 所在地：業者欄の会社の住所（〒・TEL・免許の近く、伏せ字の近く）は使わない */
+  var are = /(?:所\s*在\s*地|住居表示|住\s*所)[\s　]*[:：／/]?[\s　]*([^\n]{1,60})/g, am;
+  while ((am = are.exec(s))) {
+    var near = s.slice(Math.max(0, am.index - 40), am.index + am[0].length + 40);
+    if (/〒|TEL|FAX|免許|宅建|事務所|本社|本店|支店|営業所/.test(near) || near.indexOf(MASK) >= 0) continue;
+    var av = extraClean(String(am[1]).replace(/^[】」』\]）)]+/, ''), 40);
+    var ak = av && av.match(/^[^\s]*?[市区町村郡][^\s]*?(?:[0-9]+(?:[-－の][0-9]+)*(?:番地?|号)?|丁目|町|番地?)(?![0-9])/);
+    if (ak) { x.address = ak[0]; break; }
+  }
+  if (!x.address && typeof pickAddressOcr === 'function') x.address = pickAddressOcr(s);
+  /* 路線：駅名の直前の「〇〇線」 */
+  if (rec && rec.station) {
+    var st = String(rec.station).replace(/駅$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var lm = s.match(new RegExp('((?:JR|ＪＲ)?[^\\s「」『』●・、。:：/／()（）]{0,10}?線)[\\s　]*[「『]?[\\s　]*' + st));
+    if (lm) x.line = extraClean(lm[1].replace(/^R(?=[^\s]*線)/, 'JR'), 16);
+  }
+  var lay = s.match(/間\s*取り?[\s:：]*([1-9]?\s*S?L?D?K(?:\s*[+＋]\s*[0-9]?\s*(?:S|納戸|N|サービスルーム|WIC))?)/) ||
+            s.match(/(?:^|[^0-9A-Za-z])([1-9]\s*S?L?D?K(?:\s*[+＋]\s*[0-9]?\s*(?:S|納戸|N|サービスルーム))?)(?![A-Za-z])/);
+  if (lay && /K/.test(lay[1])) x.layout = lay[1].replace(/\s+/g, '').replace('＋', '+');
+  var stc = s.match(/(鉄骨鉄筋コンクリート|鉄筋コンクリート|軽量鉄骨|重量鉄骨|鉄骨|木造|SRC|RC|S造|W造)\s*(造)?/);
+  if (stc) x.structure = stc[1] + (/造$/.test(stc[1]) ? '' : '造');
+  var fl = s.match(/(?:地上\s*)?([0-9]{1,2})\s*階建/);
+  if (fl) x.floors = fl[1] + '階建';
+  var fo = s.match(/([0-9]{1,2})\s*階部分/) || s.match(/所\s*在\s*階[^0-9\n]{0,4}([0-9]{1,2})\s*階/);
+  if (fo) x.floorOn = fo[1] + '階';
+  var rn = s.match(/([0-9]{2,4})\s*号室/);
+  if (rn) x.roomNo = rn[1];
+  var f1 = s.match(/1\s*階[^0-9\n]{0,6}([0-9]+(?:\.[0-9]+)?)\s*(?:㎡|m2|m²)/),
+      f2 = s.match(/2\s*階[^0-9\n]{0,6}([0-9]+(?:\.[0-9]+)?)\s*(?:㎡|m2|m²)/);
+  if (f1 && f2) x.floorAreas = '1F ' + f1[1] + '㎡／2F ' + f2[1] + '㎡';
+  var lc = s.match(/地\s*目[\s:：]*(宅地|田|畑|山林|雑種地|原野|公衆用道路)/);
+  if (lc) x.landCategory = lc[1];
+  var cf = s.match(/建[ぺ蔽]い?率\s*[\/／・]\s*容積率[^0-9\n]{0,8}([0-9]{2,3})\s*[%％]?\s*[\/／・]\s*([0-9]{2,4})\s*[%％]/);
+  if (cf) { x.coverage = cf[1]; x.far = cf[2]; }
+  else {
+    var cv = s.match(/建[ぺ蔽]い?率[^0-9\n]{0,8}([0-9]{2,3})\s*[%％]/), fa = s.match(/容積率[^0-9\n]{0,8}([0-9]{2,4})\s*[%％]/);
+    if (cv) x.coverage = cv[1];
+    if (fa) x.far = fa[1];
+  }
+  var zs = s.replace(/第\s*1\s*種/g, '第一種').replace(/第\s*2\s*種/g, '第二種');
+  for (var zi = 0; zi < ZONES.length; zi++) { if (zs.indexOf(ZONES[zi]) >= 0) { x.zoning = ZONES[zi]; break; } }
+  /* 読み違いが混じりやすい項目は、決まった言い方だけを採る */
+  var pk = labelValue(s, '駐\\s*車\\s*場', 30);
+  var pkm = pk && pk.match(/^(?:空き?(?:有|無|あり|なし)|有|無|あり|なし|[0-9]+台(?:可|分)?)(?:\s*[(（][^)）]{0,20}[)）])?/);
+  if (pkm) x.parking = pkm[0];
+  var sk = (labelValue(s, '現\\s*況', 12) || '').match(/空家|空き家|空室|居住中|賃貸中|更地|古家あり|建築中|完成済|未完成|使用中/) ||
+           s.match(/現\s*況[^\n]{0,6}?(空家|空き家|空室|居住中|賃貸中|更地|古家あり|建築中|完成済|未完成)/);
+  if (sk) x.status = sk[1] || sk[0];
+  var rt = s.match(/定期借地権|旧法借地権|普通借地権|借地権|所有権/);
+  if (rt) x.rights = rt[0];
+  var hv = labelValue(s, '引\\s*渡(?:し)?(?:時期|日|可能日|可能時期)?|入居(?:時期|可能日)', 20);
+  var hm = hv && hv.match(/^(?:応?相談|即時|即日|即入居可?|現況|引渡猶予[^\s]{0,8}|(?:[0-9]{4}年)?[0-9]{1,2}月(?:上旬|中旬|下旬|末)?(?:予定)?|令和[0-9]+年[0-9]{1,2}月(?:上旬|中旬|下旬)?)/);
+  if (hm) x.handover = hm[0];
+  var mf = s.replace(/([0-9]),([0-9]{3})/g, '$1$2').match(/管理費(?:等)?[^0-9\n]{0,10}([0-9]{3,7})\s*円/);
+  if (mf) x.mgmtFee = mf[1];
+  var rf = s.replace(/([0-9]),([0-9]{3})/g, '$1$2').match(/修繕積立金[^0-9\n]{0,10}([0-9]{3,7})\s*円/);
+  if (rf) x.repairFee = rf[1];
+  /* 分譲会社・管理会社：社名の形（株式会社・管理・サービスなど）になっているものだけ */
+  var company = function (v) {
+    if (!v) return null;
+    v = v.replace(/^[】」』\]）)]+/, '').replace(/[【「『\[（(].*$/, '');
+    /* 「〇〇株式会社」の後ろに付いた読み違いの文字は落とす */
+    if (!/^(?:株式会社|有限会社|㈱)/.test(v)) v = v.replace(/(株式会社|有限会社|㈱).*$/, '$1');
+    return /株式会社|㈱|有限会社|管理|サービス|コミュニティ|ハウジング|不動産|住宅|地所|建物/.test(v) ? v : null;
+  };
+  x.developer = company(labelValue(s, '分\\s*譲\\s*会\\s*社', 24));
+  x.manager = company(labelValue(s, '管\\s*理\\s*会\\s*社', 24));
+  x.roadType = labelValue(s, '道路種別|前面道路', 16);
+  x.roadAccess = labelValue(s, '接道状況|接\\s*道', 30);
+  x.terrain = labelValue(s, '地\\s*勢', 10);
+  if (!x.terrain) { var tk = s.match(/平坦|高台|傾斜地|ひな壇/); if (tk) x.terrain = tk[0]; }
+  x.privateRoad = labelValue(s, '私道負担|私\\s*道', 16);
+  x.buildCondition = labelValue(s, '建築条件', 16);
+  x.notes = labelValue(s, '備\\s*考', 40);
+  if (x.notes) x.notes = x.notes.replace(/^[】」』\]）)]+/, '') || null;
+  if (x.notes && /^【[^】]*】?$/.test(x.notes)) x.notes = null;
+  var out = {};
+  EXTRA_KEYS.forEach(function (k) { if (x[k] != null && x[k] !== '') out[k] = String(x[k]); });
+  return out;
+}
+
 /* 3-8. 抽出メイン（④削除後のテキストに対して実行）
    引数は「1物件ぶん」のテキスト（PDFなら1ページ）。 */
 function extract(rawText, extraWords) {
@@ -1449,6 +1597,18 @@ function extract(rawText, extraWords) {
   if (rec.type === 'house' && d.score <= 2) {
     if (NAME_HINT.test(t) && !/戸建|一戸建|新築住宅|延[床べ]/.test(t)) rec.type = 'mansion';
   }
+
+  /* 土地（売地）：建物の項目（延床面積・専有面積・間取り・築年）が無く、売地・土地の語がある */
+  var noBuilding = !/延[床べ]|建物面積|専有面積|占有面積|[1-9]\s*S?L?DK|築\s*年|築[0-9０-９]/.test(t);
+  if (noBuilding && rec.ownArea == null && rec.floorArea == null &&
+      /売\s*地|売り土地|土地売買|建築条件(?:付|無|なし)?(?:き)?土地|宅地分譲|更地渡し|分譲地/.test(t)) {
+    rec.type = 'land';
+    rec.ageYears = null; rec.builtLabel = null;
+  }
+  /* 土地面積：戸建・土地のみ（マンションの「敷地面積」は建物全体の敷地なので載せない） */
+  rec.landArea = rec.type === 'mansion' ? null : pickLandArea(t);
+  /* マイソクに転記する項目 */
+  rec.extra = pickExtras(t, rec);
 
   return { record: rec, redaction: r, cleanText: t, rawText: String(rawText == null ? '' : rawText) };
 }
@@ -1526,13 +1686,14 @@ function extractAll(sections, extraWords, opts) {
 
 /* 種別ごとの必須項目（※1） */
 function requiredKeys(type) {
+  if (type === 'land') return ['priceMan', 'walkMin', 'landArea'];
   return type === 'mansion'
     ? ['priceMan', 'walkMin', 'ageYears', 'ownArea']   /* 持分は記載しない */
-    : ['priceMan', 'walkMin', 'ageYears', 'floorArea'];
+    : ['priceMan', 'walkMin', 'ageYears', 'floorArea', 'landArea'];
 }
 var FIELD_LABEL = {
   priceMan: '価格（万円）', walkMin: '駅からの徒歩分数（分）', ageYears: '築年数（年）',
-  floorArea: '延床面積（㎡）', ownArea: '専有面積（㎡）', share: '持分'
+  floorArea: '延床面積（㎡）', ownArea: '専有面積（㎡）', share: '持分', landArea: '土地面積（㎡）'
 };
 
 /* =================================================================
@@ -3395,7 +3556,7 @@ var Store = {
    6. ユーザー画面の描画
    ================================================================= */
 var LINE_SVG = '<svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.5 2 2 5.7 2 10.2c0 4 3.6 7.4 8.4 8.1.3.07.8.22.9.5.1.26.07.66.03.92l-.14.86c-.04.26-.2 1 .88.55 1.09-.46 5.86-3.45 8-5.9C21.4 13.6 22 12 22 10.2 22 5.7 17.5 2 12 2"/></svg>';
-var TYPE_LABEL = { house: '戸建', mansion: 'マンション／区分所有', unknown: '種別未判定' };
+var TYPE_LABEL = { house: '戸建', mansion: 'マンション／区分所有', land: '土地', unknown: '種別未判定' };
 var items = [];
 
 function specRow(k, v, unit) {
@@ -3403,16 +3564,154 @@ function specRow(k, v, unit) {
   return '<li><span class="k">' + esc(k) + '</span><span class="v' + (has ? '' : ' na') + '">' +
     (has ? esc(v) + (unit || '') : '資料に記載なし') + '</span></li>';
 }
+/* ===== マイソク（Canvaのデザインへの転記） =====
+   Canvaで作ったデザイン（土地・戸建・区分所有マンション）を背景にし、資料から読み取った値を
+   決まった位置に重ねる。値の入る所にデザインの仮の文字（「㎡」「年 月」など）があれば、
+   同じ色で覆ってから書く。座標はデザインの大きさ（1123×794）が基準。 */
+var MK_BG = {
+  house: 'https://static.wixstatic.com/media/7ecbee_1a62685fd8ab4034bd349c6fa61240d2~mv2.png',
+  mansion: 'https://static.wixstatic.com/media/7ecbee_b3dbc303eb24484c9e70055f4470d77a~mv2.png',
+  land: 'https://static.wixstatic.com/media/7ecbee_44982cdc9dde41f395200467e823e1b9~mv2.png'
+};
+var MK_GREEN = '#03bf64', MK_RED = '#ff5758';
+function mkTable(cols, top, rowH, rows) {
+  var out = [];
+  rows.forEach(function (row, i) {
+    row.forEach(function (key, j) {
+      out.push({ k: key, x: cols[j][0], y: top + rowH * i, w: cols[j][1], h: rowH, cover: '#fff', size: 12.5, cell: true });
+    });
+  });
+  return out;
+}
+var MK_LAYOUT = {
+  house: [
+    { k: 'name', x: 385, y: 70, w: 412, h: 44, size: 30, cls: 'w' },
+    { k: 'access', x: 800, y: 86, w: 232, h: 30, cover: MK_GREEN, size: 17, cls: 'w r' },
+    { k: 'landArea', x: 290, y: 137, w: 133, h: 26, cover: MK_GREEN, size: 16, cls: 'w c' },
+    { k: 'floorArea', x: 507, y: 137, w: 127, h: 26, cover: MK_GREEN, size: 16, cls: 'w c' },
+    { k: 'floors', x: 700, y: 137, w: 146, h: 26, cover: MK_GREEN, size: 16, cls: 'w c' },
+    { k: 'layout', x: 915, y: 137, w: 112, h: 26, cover: MK_GREEN, size: 16, cls: 'w c' },
+    { k: 'price', x: 665, y: 262, w: 285, h: 56, size: 46, cls: 'r', color: MK_RED, bold: true },
+    { k: 'points', x: 665, y: 345, w: 365, h: 250, size: 15, cls: 'multi' },
+    { k: 'sheet', x: 72, y: 182, w: 580, h: 420 }
+  ].concat(mkTable([[188, 174], [451, 175], [727, 141]], 611, 24, [
+    ['address', 'notes', 'expiry'], ['nearest', 'structure', 'built'], ['floorAreas', 'landCategory', 'coverage'],
+    ['far', 'zoning', 'parking'], ['status', 'rights', 'handover']])),
+  mansion: [
+    { k: 'nameRoom', x: 498, y: 70, w: 300, h: 44, cover: MK_GREEN, size: 28, cls: 'w' },
+    { k: 'access', x: 800, y: 86, w: 232, h: 30, cover: MK_GREEN, size: 17, cls: 'w r' },
+    { k: 'ownArea', x: 290, y: 137, w: 133, h: 26, cover: MK_GREEN, size: 16, cls: 'w c' },
+    { k: 'mgmtFee', x: 507, y: 137, w: 127, h: 26, cover: MK_GREEN, size: 16, cls: 'w c' },
+    { k: 'repairFee', x: 700, y: 137, w: 146, h: 26, cover: MK_GREEN, size: 16, cls: 'w c' },
+    { k: 'layout', x: 915, y: 137, w: 112, h: 26, cover: MK_GREEN, size: 16, cls: 'w c' },
+    { k: 'price', x: 665, y: 262, w: 285, h: 56, size: 46, cls: 'r', color: MK_RED, bold: true },
+    { k: 'points', x: 665, y: 345, w: 365, h: 250, size: 15, cls: 'multi' },
+    { k: 'sheet', x: 72, y: 182, w: 580, h: 420 }
+  ].concat(mkTable([[201, 176], [463, 178], [738, 144]], 612, 24, [
+    ['address', 'handover', 'expiry'], ['nearest', 'structure', 'built'], ['scale', 'parking', 'coverage'],
+    ['far', 'zoning', 'developer'], ['status', 'rights', 'manager']])),
+  land: [
+    { k: 'name', x: 385, y: 90, w: 412, h: 42, size: 30, cls: 'w' },
+    { k: 'access', x: 800, y: 96, w: 232, h: 30, cover: MK_GREEN, size: 17, cls: 'w r' },
+    { k: 'price', x: 680, y: 215, w: 288, h: 56, size: 46, cls: 'r', color: MK_RED, bold: true },
+    { k: 'sheet', x: 72, y: 182, w: 595, h: 430 }
+  ].concat(mkTable([[183, 175], [443, 179], [719, 144]], 623, 24, [
+    ['address', 'roadType', 'landAreaCell'], ['nearest', 'roadAccess', 'terrain'], ['zoning', 'status', 'privateRoad'],
+    ['rights', 'buildCondition', 'handover'], ['coverage', 'far', 'notes']]))
+};
+function mkNum(v) { return v == null || v === '' || isNaN(Number(v)) ? '' : Number(v).toLocaleString('ja-JP'); }
+/* マイソクに載せる文字（1項目ずつ）。値が無ければ空欄 */
+function mkValues(p) {
+  var x = p.extra || {};
+  if (typeof x === 'string') { try { x = JSON.parse(x) || {}; } catch (e) { x = {}; } }
+  var st = p.station ? String(p.station).replace(/駅$/, '') : '';
+  var access = st ? (x.line || '') + '「' + st + '駅」' + (p.walkMin != null ? '徒歩' + p.walkMin + '分' : '')
+                  : (p.walkMin != null ? '徒歩' + p.walkMin + '分' : '');
+  var pct = function (v) { return v ? String(v).replace(/[%％]$/, '') + '%' : ''; };
+  var yen = function (v) { return v ? mkNum(String(v).replace(/[^0-9.]/g, '')) + '円/月' : ''; };
+  var sqm = function (v) { return v != null && v !== '' ? v + '㎡' : ''; };
+  return {
+    name: p.name || '',
+    nameRoom: (p.name || '') + (x.roomNo ? '　' + x.roomNo + '号室' : ''),
+    access: access,
+    landArea: sqm(p.landArea), landAreaCell: sqm(p.landArea), floorArea: sqm(p.floorArea), ownArea: sqm(p.ownArea),
+    floors: x.floors || '', layout: x.layout || '',
+    mgmtFee: yen(x.mgmtFee), repairFee: yen(x.repairFee),
+    price: p.priceMan != null ? mkNum(p.priceMan) : '',
+    points: x.points || '',
+    address: x.address || '', notes: x.notes || '', expiry: x.expiry || '',
+    nearest: st ? st + '駅' + (p.walkMin != null ? ' 徒歩' + p.walkMin + '分' : '') : '',
+    structure: x.structure || '',
+    built: p.builtLabel || (p.ageYears != null ? (p.ageYears === 0 ? '新築' : '築' + p.ageYears + '年') : ''),
+    floorAreas: x.floorAreas || '', landCategory: x.landCategory || '',
+    coverage: pct(x.coverage), far: pct(x.far), zoning: x.zoning || '', parking: x.parking || '',
+    status: x.status || '', rights: x.rights || '', handover: x.handover || '',
+    scale: [x.floors, x.floorOn].filter(Boolean).join('／'),
+    developer: x.developer || '', manager: x.manager || '',
+    roadType: x.roadType || '', roadAccess: x.roadAccess || '', terrain: x.terrain || '',
+    privateRoad: x.privateRoad || '', buildCondition: x.buildCondition || ''
+  };
+}
+/* 文字が枠に収まるよう、長さに応じて字を小さくする（全角1・半角0.55文字として数える） */
+function mkFit(text, w, size, min) {
+  var n = 0;
+  String(text).split('').forEach(function (ch) { n += /[\x20-\x7e]/.test(ch) ? 0.56 : 1; });
+  if (!n) return size;
+  return Math.max(min || 8, Math.min(size, (w - 8) / n));
+}
+function maisokuHtml(p, opts) {
+  var t = p.type === 'mansion' ? 'mansion' : p.type === 'land' ? 'land' : 'house';
+  var v = mkValues(p), parts = [];
+  MK_LAYOUT[t].forEach(function (e) {
+    var box = 'left:' + e.x + 'px;top:' + e.y + 'px;width:' + e.w + 'px;height:' + e.h + 'px;';
+    if (e.k === 'sheet') {
+      if (p.sheetImage) parts.push('<img class="mk-sheet sheet-thumb" src="' + esc(p.sheetImage) + '" alt="物件資料（クリックで拡大）" style="' + box + '">');
+      return;
+    }
+    var text = v[e.k] || '';
+    if (e.cover) {
+      var ins = e.cell ? 1.5 : 0;
+      parts.push('<div style="position:absolute;left:' + (e.x + ins) + 'px;top:' + (e.y + ins) + 'px;width:' + (e.w - ins * 2) +
+        'px;height:' + (e.h - ins * 2) + 'px;background:' + e.cover + '"></div>');
+    }
+    if (!text) return;
+    var size = e.cls === 'multi' ? e.size : mkFit(text, e.w, e.size, e.cell ? 7.5 : 10);
+    parts.push('<div class="f ' + (e.cls || '') + '" style="' + box + 'font-size:' + size.toFixed(1) + 'px;' +
+      (e.cell ? 'padding:0 5px;' : '') + (e.color ? 'color:' + e.color + ';' : '') + (e.bold ? 'font-weight:800;' : '') + '">' +
+      esc(text) + '</div>');
+  });
+  return '<div class="mk-wrap" data-mk="' + esc(p._id || p.id || '') + '"><div class="mk" style="background-image:url(' + MK_BG[t] + ')">' +
+    parts.join('') + '</div></div>';
+}
+/* 表示幅に合わせてマイソクを縮める */
+/* 隠れている画面（ユーザー画面に切り替える前など）では幅が0なので、表示されて幅が決まった時にも縮め直す */
+var mkObserver = window.ResizeObserver ? new ResizeObserver(function (entries) {
+  entries.forEach(function (en) {
+    var w = en.target, mk = w.firstChild;
+    if (mk && w.clientWidth) mk.style.transform = 'scale(' + (w.clientWidth / 1123) + ')';
+  });
+}) : null;
+function fitMaisoku(root) {
+  Array.prototype.forEach.call((root || document).querySelectorAll('.mk-wrap'), function (w) {
+    var mk = w.firstChild;
+    if (mk && w.clientWidth) mk.style.transform = 'scale(' + (w.clientWidth / 1123) + ')';
+    if (mkObserver && !w.__mkObs) { mkObserver.observe(w); w.__mkObs = true; }
+  });
+}
+window.addEventListener('resize', function () { fitMaisoku(); });
+
 function cardHtml(p) {
-  var t = p.type === 'mansion' ? 'mansion' : p.type === 'house' ? 'house' : 'unknown';
+  var t = p.type === 'mansion' ? 'mansion' : p.type === 'house' ? 'house' : p.type === 'land' ? 'land' : 'unknown';
   var details = [];
   try { details = JSON.parse(p.detailsJson || '[]') || []; } catch (e) { details = []; }
   if (!Array.isArray(details)) details = [];
   var specs = '';
   specs += specRow('価格', priceLabel(p.priceMan));
   specs += specRow('駅からの徒歩', p.walkMin != null ? (p.station ? p.station + '／徒歩' + p.walkMin : '徒歩' + p.walkMin) : null, '分');
-  specs += specRow('築年数', p.ageYears != null ? (p.ageYears === 0 ? '新築' : p.ageYears + '年') + (p.builtLabel ? '（' + p.builtLabel + '築）' : '') : null);
-  if (t === 'mansion') {
+  if (t !== 'land') specs += specRow('築年数', p.ageYears != null ? (p.ageYears === 0 ? '新築' : p.ageYears + '年') + (p.builtLabel ? '（' + p.builtLabel + '築）' : '') : null);
+  if (t === 'land') {
+    specs += specRow('土地面積', p.landArea, '㎡');
+  } else if (t === 'mansion') {
     specs += specRow('専有面積', p.ownArea, '㎡');
     /* 持分はユーザー画面に載せない（運用上不要のため） */
   } else {
@@ -3423,10 +3722,9 @@ function cardHtml(p) {
     '<h3>' + esc(p.name || '物件情報') + '</h3>' +
     '<div class="price">' + (p.priceMan != null ? esc(priceLabel(p.priceMan)) : '<span class="na">価格はお問い合わせください</span>') + '</div>' +
     '<ul class="specs">' + specs + '</ul>' +
-    (p.sheetImage ? '<div style="padding:0 16px 12px">' +
-      '<img class="sheet-thumb" src="' + esc(p.sheetImage) + '" alt="掲載資料をクリックで拡大" loading="lazy" ' +
-      'style="width:100%;border:1px solid var(--line);border-radius:9px;display:block">' +
-      '<p class="note" style="padding:6px 0 0;margin:0">クリックすると画面いっぱいに表示されます</p></div>' : '') +
+    /* Canvaのデザインに転記したマイソク。中の資料画像を押すと資料そのものを拡大する */
+    '<div style="padding:0 16px 12px">' + maisokuHtml(p) +
+      '<p class="note" style="padding:6px 0 0;margin:0">クリックすると画面いっぱいに表示されます</p></div>' +
     (details.length ? '<details class="raw" style="margin:0 16px 12px">' +
       '<summary>物件概要を見る</summary>' +
       '<table class="detail"><tbody>' + details.map(function (d) {
@@ -3447,6 +3745,7 @@ function renderPublic() {
   }[sort];
   if (by) arr.sort(by);
   document.getElementById('pubGrid').innerHTML = arr.map(cardHtml).join('');
+  fitMaisoku(document.getElementById('pubGrid'));
   document.getElementById('pubEmpty').hidden = arr.length > 0;
   document.getElementById('pubCount').textContent = arr.length ? arr.length + '件を表示中' : '';
 }
@@ -3456,7 +3755,19 @@ document.getElementById('fSort').addEventListener('change', renderPublic);
 /* ③ 資料を画面いっぱいに表示する */
 var viewer = document.getElementById('viewer');
 var viewerImg = document.getElementById('viewerImg');
+var viewerMk = document.getElementById('viewerMk');
+/* マイソクを画面いっぱいに表示する */
+function openMaisoku(html) {
+  viewerImg.hidden = true; viewerImg.removeAttribute('src');
+  viewerMk.innerHTML = html; viewerMk.hidden = false;
+  viewer.classList.remove('zoomed');
+  viewer.hidden = false;
+  document.documentElement.style.overflow = 'hidden';
+  fitMaisoku(viewerMk);
+}
 function openViewer(src) {
+  viewerMk.hidden = true; viewerMk.innerHTML = '';
+  viewerImg.hidden = false;
   viewerImg.src = src;
   viewer.classList.remove('zoomed');
   viewer.hidden = false;
@@ -3465,6 +3776,7 @@ function openViewer(src) {
 function closeViewer() {
   viewer.hidden = true;
   viewerImg.removeAttribute('src');
+  viewerMk.hidden = true; viewerMk.innerHTML = '';
   document.documentElement.style.overflow = '';
 }
 document.getElementById('viewerClose').addEventListener('click', closeViewer);
@@ -3478,7 +3790,10 @@ document.addEventListener('keydown', function (e) {
 /* 資料画像はどこにあってもクリックで全画面になる */
 document.addEventListener('click', function (e) {
   var img = e.target.closest ? e.target.closest('.sheet-thumb') : null;
-  if (img && img.tagName === 'IMG') { e.preventDefault(); openViewer(img.src); }
+  if (img && img.tagName === 'IMG') { e.preventDefault(); openViewer(img.src); return; }
+  /* マイソクの資料画像以外の所を押したら、マイソクを大きく表示する */
+  var mk = e.target.closest ? e.target.closest('.mk-wrap') : null;
+  if (mk && !viewerMk.contains(mk)) { e.preventDefault(); openMaisoku(mk.outerHTML); }
 });
 
 /* =================================================================
@@ -3665,10 +3980,15 @@ function runPdfJob(file, line, ocrPages, only, onSaved) {
               cur.name = merged.record.name; changed = true;
               if (merged.nameGuessed) d.res.nameGuessed = true;
             }
-            if (cur.type !== 'house' && cur.type !== 'mansion' &&
-                (merged.record.type === 'house' || merged.record.type === 'mansion')) {
+            if (cur.type !== 'house' && cur.type !== 'mansion' && cur.type !== 'land' &&
+                (merged.record.type === 'house' || merged.record.type === 'mansion' || merged.record.type === 'land')) {
               cur.type = merged.record.type; changed = true;
             }
+            /* マイソクの項目は、文字認識で読めたものを補う */
+            cur.extra = cur.extra || {};
+            var mx = merged.record.extra || {};
+            Object.keys(mx).forEach(function (k) { if (cur.extra[k] == null) { cur.extra[k] = mx[k]; changed = true; } });
+            if (cur.landArea == null && merged.record.landArea != null && cur.type !== 'mansion') { cur.landArea = merged.record.landArea; changed = true; }
             d.res.ocr = true;
           }
           if (d.res.filled > 0) d.res.noText = false;
@@ -3779,7 +4099,7 @@ function voteOcrPrice(cands) {
         ocrSparse＝散らばった文字を拾って読んだ文字、ocrPrice＝大きな字の価格）
    2通りの読み方のそれぞれで項目を読み取り、片方で欠けた項目をもう片方で補う。
    文字認識が使えなかったときは null を返す。 */
-var OCR_FILL_KEYS = ['walkMin', 'station', 'ageYears', 'builtLabel', 'floorArea', 'ownArea', 'share'];
+var OCR_FILL_KEYS = ['walkMin', 'station', 'ageYears', 'builtLabel', 'floorArea', 'ownArea', 'share', 'landArea'];
 function mergeOcrResult(res, im, extraWords) {
   var raw = res.rawText || '';
   var dense = im.ocrText || '', sparse = im.ocrSparse || '';
@@ -3791,12 +4111,16 @@ function mergeOcrResult(res, im, extraWords) {
   var base = eS && eD ? (filledCount(eD.record) > filledCount(eS.record) ? eD : eS) : (eS || eD);
   var other = base === eS ? eD : eS;
   var rec = base.record;
-  var known = function (t) { return t === 'house' || t === 'mansion'; };
+  var known = function (t) { return t === 'house' || t === 'mansion' || t === 'land'; };
   if (!known(rec.type) && other && known(other.record.type)) rec.type = other.record.type;
   if (other) {
     OCR_FILL_KEYS.forEach(function (k) {
       if (rec[k] == null && other.record[k] != null) rec[k] = other.record[k];
     });
+    /* マイソクの項目も、もう一方の読み方で読めたものを補う */
+    rec.extra = rec.extra || {};
+    var ox = other.record.extra || {};
+    Object.keys(ox).forEach(function (k) { if (rec.extra[k] == null) rec.extra[k] = ox[k]; });
     /* 罫線を消して読み直した結果で、まだ欠けている項目を補う */
     if (extra.replace(/\s/g, '').length >= 8) {
       var eX = extract(raw + '\n' + extra, extraWords).record;
@@ -3863,6 +4187,8 @@ function mergeOcrResult(res, im, extraWords) {
   /* 種別に合わない面積は持たない（マンションに延床面積は無い） */
   if (rec.type === 'mansion') rec.floorArea = null;
   if (rec.type === 'house') { rec.ownArea = null; rec.share = null; }
+  if (rec.type === 'land') { rec.floorArea = null; rec.ownArea = null; rec.share = null; rec.ageYears = null; rec.builtLabel = null; }
+  if (rec.type === 'mansion') rec.landArea = null;
 
   /* 価格：文字データで読めていればそれが正しい。無いときだけ文字認識の候補から選ぶ。
      賃貸の資料では大きな数字は家賃なので、価格の推測はしない */
@@ -4036,7 +4362,7 @@ function publishBlockReason(res) {
   var r = res.record || {};
   if (res.ocrPending) return '資料画像の作成・文字認識の途中です。終わるまでお待ちください';
   var miss = [];
-  if (r.type !== 'house' && r.type !== 'mansion') miss.push('種別');
+  if (r.type !== 'house' && r.type !== 'mansion' && r.type !== 'land') miss.push('種別');
   if (!r.name || !String(r.name).trim()) miss.push('物件名');
   if (r.priceMan == null || r.priceMan === '') miss.push('価格');
   if (miss.length) return miss.join('・') + 'が未入力です';
@@ -4059,11 +4385,11 @@ function renderReview() {
   area.innerHTML = drafts.map(function (d) {
     var r = d.res.record, req = requiredKeys(r.type);
     var rows = '';
-    var isUnknownType = (r.type !== 'house' && r.type !== 'mansion');
+    var isUnknownType = (r.type !== 'house' && r.type !== 'mansion' && r.type !== 'land');
     rows += '<div class="row"><label>種別' + (isUnknownType ? ' <span style="color:var(--warn);font-size:12px">※必ず選択してください</span>' : '') + '</label>' +
       '<select data-f="type" data-id="' + d.id + '" style="' + (isUnknownType ? 'border:2px solid var(--warn)' : '') + '">' +
       (isUnknownType ? '<option value="" disabled selected>― 種別を選択してください ―</option>' : '') +
-      ['house', 'mansion'].map(function (t) {
+      ['house', 'mansion', 'land'].map(function (t) {
         return '<option value="' + t + '"' + (r.type === t ? ' selected' : '') + '>' + TYPE_LABEL[t] + '</option>';
       }).join('') + '</select></div>';
     rows += '<div class="row"><label>物件名' + (d.res.nameGuessed ? ' <span style="color:var(--warn);font-size:12px">※資料の名前が読めないため所在地から仮につけました</span>' : '') + '</label>' +
@@ -4085,6 +4411,20 @@ function renderReview() {
     if (r.walkMin != null || r.station) {
       rows += '<div class="row"><label>最寄駅（任意）</label><input data-f="station" data-id="' + d.id + '" value="' + esc(r.station || '') + '"></div>';
     }
+    /* マイソク（Canvaのデザイン）に転記する項目。読めなかった所は空欄（手入力できる） */
+    var ex = r.extra || {};
+    var exKeys = EXTRA_BY_TYPE[r.type] || EXTRA_BY_TYPE.house;
+    var exRows = exKeys.map(function (k) {
+      var val = ex[k] == null ? '' : ex[k];
+      var input = k === 'points'
+        ? '<textarea data-x="' + k + '" data-id="' + d.id + '" rows="3" placeholder="例）南向き・リフォーム済・駅近">' + esc(val) + '</textarea>'
+        : '<input data-x="' + k + '" data-id="' + d.id + '" value="' + esc(val) + '"' +
+          (val && d.res.ocr ? ' style="background:#fff8e1"' : '') + '>';
+      return '<div class="row"><label>' + esc(EXTRA_LABEL[k]) + '</label>' + input + '</div>';
+    }).join('');
+    rows += '<details class="raw" style="margin:6px 0 0"' + '>' +
+      '<summary>マイソクに載る項目（' + exKeys.filter(function (k) { return ex[k]; }).length + '／' + exKeys.length + '項目を読み取り・手直しできます）</summary>' +
+      exRows + '</details>';
 
     var hits = d.res.redaction.hits;
     var hitList = Object.keys(hits).map(function (k) { return '<li>' + esc(k) + '：' + hits[k] + '件</li>'; }).join('');
@@ -4120,6 +4460,9 @@ function renderReview() {
           : '<div class="redact" style="background:#f3f6f9;border-color:#dfe5ec;color:#5d6b7d">' +
             'この資料からは、確実に判定できる概要項目がありませんでした。' +
             '上の項目（価格・駅徒歩・築年数・面積・持分）だけが公開されます。</div>') +
+        '<div style="margin:12px 14px 0"><div style="font-size:12.5px;color:var(--sub);margin-bottom:6px">' +
+          'ユーザー画面に載るマイソク（Canvaのデザインに転記・プレビュー）</div>' +
+          '<div data-mkprev="' + d.id + '" style="max-width:760px">' + maisokuHtml(r) + '</div></div>' +
         (r.sheetImage
           ? '<div style="margin:12px 14px 0">' +
             (d.res.needsVisualCheck
@@ -4141,19 +4484,31 @@ function renderReview() {
         '<details class="raw"><summary>削除後のテキストを確認する（管理者のみ・公開されません）</summary><pre>' + esc(d.res.cleanText) + '</pre></details>' +
       '</div></div>';
   }).join('');
+  fitMaisoku(area);
+}
+/* 手直ししたらマイソクのプレビューを描き直す */
+function refreshMkPreview(d) {
+  var el = document.querySelector('[data-mkprev="' + d.id + '"]');
+  if (el) { el.innerHTML = maisokuHtml(d.res.record); fitMaisoku(el); }
 }
 
 document.getElementById('reviewArea').addEventListener('input', function (e) {
   var f = e.target.getAttribute('data-f'), id = e.target.getAttribute('data-id');
-  if (!f || !id) return;
+  var xk = e.target.getAttribute('data-x');
+  if ((!f && !xk) || !id) return;
   var d = drafts.filter(function (x) { return x.id === id; })[0];
   if (!d) return;
   var v = e.target.value;
-  if (['priceMan', 'walkMin', 'ageYears', 'floorArea', 'ownArea'].indexOf(f) !== -1) {
+  if (xk) {
+    d.res.record.extra = d.res.record.extra || {};
+    if (v.trim() === '') delete d.res.record.extra[xk]; else d.res.record.extra[xk] = v;
+  } else if (['priceMan', 'walkMin', 'ageYears', 'floorArea', 'ownArea', 'landArea'].indexOf(f) !== -1) {
     d.res.record[f] = v === '' ? null : num(v);
   } else {
     d.res.record[f] = v === '' ? null : v;
   }
+  refreshMkPreview(d);
+  DraftStore.save(drafts);
 });
 document.getElementById('reviewArea').addEventListener('change', function (e) {
   var useSheet = e.target.getAttribute('data-usesheet');
@@ -4178,8 +4533,11 @@ document.getElementById('reviewArea').addEventListener('change', function (e) {
   if (e.target.value === 'mansion') {
     if (d.res.record.ownArea == null) d.res.record.ownArea = pickArea(t, 'own');
     if (d.res.record.share == null) d.res.record.share = pickShare(t);
-  } else if (d.res.record.floorArea == null) {
-    d.res.record.floorArea = pickArea(t, 'floor');
+  } else if (e.target.value === 'land') {
+    if (d.res.record.landArea == null) d.res.record.landArea = pickLandArea(t);
+  } else {
+    if (d.res.record.floorArea == null) d.res.record.floorArea = pickArea(t, 'floor');
+    if (d.res.record.landArea == null) d.res.record.landArea = pickLandArea(t);
   }
   renderReview();
 });
@@ -4282,10 +4640,12 @@ function renderAdminList() {
   tb.innerHTML = items.map(function (p) {
     var area = p.type === 'mansion'
       ? (p.ownArea != null ? p.ownArea + '㎡（専有）' : '—')
+      : p.type === 'land'
+      ? (p.landArea != null ? p.landArea + '㎡（土地）' : '—')
       : (p.floorArea != null ? p.floorArea + '㎡（延床）' : '—');
     return '<tr>' +
       '<td><input type="checkbox" class="selbox" data-sel="' + esc(p._id) + '"></td>' +
-      '<td>' + TYPE_LABEL[p.type === 'mansion' ? 'mansion' : p.type === 'house' ? 'house' : 'unknown'] + '</td>' +
+      '<td>' + TYPE_LABEL[p.type === 'mansion' ? 'mansion' : p.type === 'house' ? 'house' : p.type === 'land' ? 'land' : 'unknown'] + '</td>' +
       '<td>' + esc(p.name || '（未設定）') + '</td>' +
       '<td class="num">' + (p.priceMan != null ? esc(priceLabel(p.priceMan)) : '—') + '</td>' +
       '<td class="num">' + (p.walkMin != null ? '徒歩' + p.walkMin + '分' : '—') + '</td>' +
@@ -4502,6 +4862,7 @@ window.__RE = {
   mergeOcrResult: mergeOcrResult, voteOcrPrice: voteOcrPrice, pickNameOcr: pickNameOcr, Ocr: Ocr,
   pickPriceByText: pickPriceByText, tightenText: tightenText, pickAddressOcr: pickAddressOcr, Store: Store,
   pickWalkDict: pickWalkDict, matchStation: matchStation, removeRules: removeRules, pickStationDict: pickStationDict,
+  maisokuHtml: maisokuHtml, fitMaisoku: fitMaisoku, mkValues: mkValues, pickExtras: pickExtras, pickLandArea: pickLandArea,
   readByLabels: readByLabels, cropForRead: cropForRead, unslant: unslant, fontsLoaded: fontsLoaded, allFontsEmbedded: allFontsEmbedded,
   /* 検証用：確認待ちの物件の状態（掲載できない理由・保存する大きさ） */
   __drafts: function () {

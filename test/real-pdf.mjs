@@ -39,7 +39,8 @@ const res = await p.evaluate(async (only) => {
   const ocrPages = {};
   all.forEach(r => { if (r.noText || r.filled < 3 || r.record.priceMan == null) ocrPages[r.pageNo] = true; });
   const imgs = {};
-  await RE.renderRedactedPdf(file, [], { ocrPages, onPage: im => { imgs[im.pageNo] = im; } });
+  const onlyP = only.length ? Object.fromEntries(only.map(n => [n, true])) : null;
+  await RE.renderRedactedPdf(file, [], { ocrPages, only: onlyP, onPage: im => { imgs[im.pageNo] = im; } });
   /* 元の紙面も同じ大きさで描いておく（比較用） */
   const pdf = await window.pdfjsLib.getDocument({ data: buf.slice(0), cMapUrl: RE.CONFIG.PDFJS_BASE + 'cmaps/', cMapPacked: true, standardFontDataUrl: RE.CONFIG.PDFJS_BASE + 'standard_fonts/' }).promise;
   const out = [];
@@ -65,7 +66,7 @@ const res = await p.evaluate(async (only) => {
     out.push({
       page: r.pageNo, noText: !!r.noText, textItems: (secs[r.pageNo-1]||'').replace(/\s/g,'').length,
       name: rec.name, type: rec.type, priceMan: rec.priceMan, walkMin: rec.walkMin, station: rec.station,
-      age: rec.ageYears, built: rec.builtLabel, ownArea: rec.ownArea, floorArea: rec.floorArea, share: rec.share,
+      age: rec.ageYears, built: rec.builtLabel, landArea: rec.landArea, extra: rec.extra, ownArea: rec.ownArea, floorArea: rec.floorArea, share: rec.share,
       masked: im.masked, croppedPx: im.croppedPx, overPaint: im.overPaint,
       rawText: (secs[r.pageNo-1]||'').slice(0, 1500), ocrText: (im.ocrText||'').slice(0, 3000), ocrSparse: (im.ocrSparse||'').slice(0, 3000), ocrExtra: (im.ocrExtra||'').slice(0, 4000), ocrLabel: im.ocrLabel || null,
       orig: cv.toDataURL('image/jpeg', 0.7), outImg: im.dataUrl || null

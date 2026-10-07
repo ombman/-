@@ -47,11 +47,11 @@ const r = await p.evaluate(async () => {
     shots.push({ ms: Date.now()-t0,
                  prog: m ? Number(m[1]) : null,
                  total: m ? Number(m[2]) : null,
-                 imgs: document.querySelectorAll('img.sheet-thumb').length });
+                 imgs: document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length });
     if (txt.indexOf('作成しました') >= 0) { doneAt = Date.now()-t0; break; }
     await new Promise(r=>setTimeout(r,200));
   }
-  return { shots, doneAt, finalImgs: document.querySelectorAll('img.sheet-thumb').length,
+  return { shots, doneAt, finalImgs: document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length,
            finalLog: log().replace(/\s+/g,' ').trim() };
 });
 

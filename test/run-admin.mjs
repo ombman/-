@@ -70,8 +70,8 @@ ok('操作バーが隠れる', !(await p.isVisible('#admTools')));
 
 console.log('\n-- ③ 資料をクリックで全画面表示');
 await p.setInputFiles('#fileInput',[path.join(FIX,'sheet.pdf')]);
-await p.waitForFunction(()=>document.querySelectorAll('#reviewArea .review img.sheet-thumb').length>0,{timeout:40000});
-await p.click('#reviewArea img.sheet-thumb'); await p.waitForTimeout(300);
+await p.waitForFunction(()=>document.querySelectorAll('#reviewArea .review img.sheet-thumb:not(.mk-sheet)').length>0,{timeout:40000});
+await p.click('#reviewArea img.sheet-thumb:not(.mk-sheet)'); await p.waitForTimeout(300);
 ok('確認画面の資料をクリックで全画面になる', await p.isVisible('#viewer'));
 const box = await p.locator('#viewerImg').boundingBox();
 const vp = p.viewportSize();

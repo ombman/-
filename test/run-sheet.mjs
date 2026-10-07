@@ -95,8 +95,8 @@ await p.fill('#pw', await p.evaluate(() => window.__RE.CONFIG.FALLBACK_PASSWORD)
 await p.click('#btnLogin');
 await p.waitForSelector('#adminBody:not([hidden])');
 await p.setInputFiles('#fileInput', [path.join(FIX, 'sheet.pdf')]);
-await p.waitForFunction(() => document.querySelectorAll('#reviewArea .review img').length > 0, { timeout: 40000 });
-ok('確認画面に資料画像が出る', (await p.$$('#reviewArea .review img')).length === 1);
+await p.waitForFunction(() => document.querySelectorAll('#reviewArea .review img:not(.mk-sheet)').length > 0, { timeout: 40000 });
+ok('確認画面に資料画像が出る', (await p.$$('#reviewArea .review img:not(.mk-sheet)')).length === 1);
 ok('作成件数がログに出る', /資料画像を <b>1件<\/b>作成/.test(await p.innerHTML('#dropLog')),
    (await p.textContent('#dropLog')).replace(/\s+/g,' ').slice(-60));
 ok('切り取りの実施が伝わる', /切り取り/.test(await p.textContent('#dropLog')));

@@ -59,7 +59,7 @@ const ui = await p.evaluate(async () => {
     const done = document.getElementById('dropLog').textContent.indexOf('作成しました') >= 0;
     if (done) {
       const cards = document.querySelectorAll('[data-act="publish"]').length;
-      const imgs = document.querySelectorAll('img.sheet-thumb').length;
+      const imgs = document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length;
       return { cards, ocrBadges: count('文字認識'), manualBadges: count('手入力が必要'),
                images: imgs,
                log: (document.getElementById('dropLog').textContent||'').replace(/\s+/g,' ').trim() };

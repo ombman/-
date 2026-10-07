@@ -170,8 +170,30 @@ function safeSheetImage(v) {
   return v;
 }
 
+/* マイソク（Canvaのデザイン）に載せる項目。決まった項目だけを通し、連絡先が混じる値は保存しない。
+   分譲会社・管理会社は物件の属性なので社名を残す（掲載元の業者の社名・連絡先ではない） */
+const EXTRA_KEYS = ['address', 'line', 'layout', 'structure', 'floors', 'floorOn', 'roomNo', 'floorAreas',
+  'landCategory', 'coverage', 'far', 'zoning', 'parking', 'status', 'rights', 'handover',
+  'mgmtFee', 'repairFee', 'developer', 'manager', 'roadType', 'roadAccess', 'terrain',
+  'privateRoad', 'buildCondition', 'notes', 'points', 'expiry'];
+const CONTACT = /[0-9]{2,4}[-ー－][0-9]{2,4}[-ー－][0-9]{3,4}|@|https?:\/\/|www\.|TEL|FAX|［削除済み］/i;
+function safeExtra(v) {
+  let x = v;
+  if (typeof x === 'string') { try { x = JSON.parse(x); } catch (e) { return null; } }
+  if (!x || typeof x !== 'object') return null;
+  const out = {};
+  EXTRA_KEYS.forEach((k) => {
+    if (x[k] === null || x[k] === undefined || x[k] === '') return;
+    const s = String(x[k]).slice(0, k === 'points' ? 300 : 60);
+    if (CONTACT.test(s)) return;
+    if (k !== 'developer' && k !== 'manager' && LEAK.test(s)) return;
+    out[k] = s;
+  });
+  return Object.keys(out).length ? JSON.stringify(out) : null;
+}
+
 function sanitize(r) {
-  const type = r && r.type === 'mansion' ? 'mansion' : 'house';
+  const type = r && (r.type === 'mansion' || r.type === 'land') ? r.type : 'house';
   return {
     title: safeText(r.name) || '物件情報',
     propertyType: type,
@@ -182,6 +204,8 @@ function sanitize(r) {
     builtLabel: safeText(r.builtLabel),
     // ※1 種別ごとの項目
     floorArea: type === 'house' ? numOrNull(r.floorArea) : null,
+    landArea: type !== 'mansion' ? numOrNull(r.landArea) : null,
+    extraJson: safeExtra(r.extra),
     ownArea: type === 'mansion' ? numOrNull(r.ownArea) : null,
     ownShare: type === 'mansion' ? safeText(r.share) : null,
     sourceFile: safeText(r.sourceFile),
@@ -202,6 +226,8 @@ function toClient(item) {
     ageYears: item.ageYears ?? null,
     builtLabel: item.builtLabel ?? null,
     floorArea: item.floorArea ?? null,
+    landArea: item.landArea ?? null,
+    extra: (() => { try { return item.extraJson ? JSON.parse(item.extraJson) : null; } catch (e) { return null; } })(),
     ownArea: item.ownArea ?? null,
     share: item.ownShare ?? null,
     sourceFile: item.sourceFile ?? null,

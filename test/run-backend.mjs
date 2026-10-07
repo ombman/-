@@ -37,6 +37,12 @@ for (const mod of MODS) {
   const r2 = await M.login('pw-test-1');
   const s2 = await M.saveProperty(r2.token, { type:'house', name:'テスト2', priceMan: 2000 }).catch(x=>x);
   ok('adminTokenSalt がある従来の設定でもログイン・保存できる', !(s2 instanceof Error), s2 && s2.message);
+  const land = await M.saveProperty(r2.token, { type: 'land', name: '土地テスト', priceMan: 3000, landArea: 120.5, floorArea: 99,
+    extra: { address: '西宮市甲子園町1-1', zoning: '第一種住居地域', notes: 'お問合せ 06-1234-5678', developer: '株式会社サンプル', evil: 'x' } });
+  ok('土地は土地のまま保存し、土地面積を残す（延床面積は持たない）', land.type === 'land' && land.landArea === 120.5 && land.floorArea === null, JSON.stringify(land).slice(0, 120));
+  ok('マイソクの項目を保存する', land.extra && land.extra.address === '西宮市甲子園町1-1' && land.extra.zoning === '第一種住居地域', JSON.stringify(land.extra));
+  ok('電話番号が混じる項目と、決まっていない項目は保存しない', land.extra && !('notes' in land.extra) && !('evil' in land.extra), JSON.stringify(land.extra));
+  ok('分譲会社は物件の属性なので社名を残す', land.extra && land.extra.developer === '株式会社サンプル', JSON.stringify(land.extra));
   const forged = await M.saveProperty(String(Date.now()+99999)+'.deadbeef', {}).catch(x=>x);
   ok('偽のトークンは拒否', forged instanceof Error, String(forged));
 }

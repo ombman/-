@@ -229,6 +229,27 @@ const ocrCases = await p.evaluate(() => [
 ocrCases.forEach(c => ok((c.want ? '消す：' : '残す：') + c.t.slice(0,26),
                          c.got === c.want, `判定=${c.got}`));
 
+console.log('\n-- マイソク（Canvaのデザイン）への転記');
+const mk = await p.evaluate(() => {
+  const R = window.__RE;
+  const land = R.extract('売地\n所在地 西宮市上鳴尾町13-18\n交通 阪神本線「鳴尾・武庫川女子大前」駅 徒歩4分\n価格 3,280万円\n土地面積 150.25㎡（45.45坪）\n用途地域 第一種住居地域　建ぺい率 60%　容積率 200%\n地目 宅地\n接道 南側公道 幅員6m\n建築条件 なし\n現況 更地\n引渡 相談\n取引態様 媒介\n株式会社サンプル不動産 TEL 06-1234-5678 所在地 大阪市北区梅田1-1-1', []).record;
+  const house = R.extract('中古戸建\n所在地：西宮市甲子園口3丁目12-5\nJR神戸線「甲子園口」駅 徒歩8分\n価格 4,980万円\n土地面積 120.33㎡ 延床面積 98.50㎡\n間取り 4LDK 木造2階建\n築年月 2014年3月\n用途地域 第一種中高層住居専用地域\n駐車場 2台可\n権利 所有権', []).record;
+  const ocrHouse = R.extract('戸建\n延床面積 98.5㎡\n土地面積 120㎡ 接道 南側', []).record;
+  const html = R.maisokuHtml(Object.assign({ _id: 'x' }, land));
+  return { land, house, ocrHouse, html };
+});
+ok('「売地」の資料を土地と判定する', mk.land.type === 'land', mk.land.type);
+ok('土地面積を読む', mk.land.landArea === 150.25, String(mk.land.landArea));
+ok('土地では築年数・延床面積を持たない', mk.land.ageYears == null && mk.land.floorArea == null, JSON.stringify([mk.land.ageYears, mk.land.floorArea]));
+ok('所在地は物件のものを読む（業者の住所は使わない）', mk.land.extra.address === '西宮市上鳴尾町13-18', mk.land.extra.address);
+ok('用途地域・建ぺい率・容積率を読む', mk.land.extra.zoning === '第一種住居地域' && mk.land.extra.coverage === '60' && mk.land.extra.far === '200', JSON.stringify(mk.land.extra));
+ok('路線を読む', mk.land.extra.line === '阪神本線', mk.land.extra.line);
+ok('戸建の間取り・構造・規模・駐車場を読む', mk.house.type === 'house' && mk.house.extra.layout === '4LDK' && mk.house.extra.structure === '木造' && mk.house.extra.floors === '2階建' && mk.house.extra.parking === '2台可', JSON.stringify(mk.house.extra));
+ok('戸建の土地面積も読む', mk.house.landArea === 120.33, String(mk.house.landArea));
+ok('建物の項目がある資料は土地にしない', mk.ocrHouse.type !== 'land', mk.ocrHouse.type);
+ok('マイソクに価格・所在地が載る', mk.html.indexOf('3,280') >= 0 && mk.html.indexOf('西宮市上鳴尾町13-18') >= 0 && mk.html.indexOf('7ecbee_44982cdc') >= 0, mk.html.slice(0, 80));
+ok('マイソクに業者の連絡先は載らない', !/06-1234-5678|サンプル不動産|梅田/.test(mk.html), '');
+
 /* スキャン資料で行頭の「●」が「@」と読まれた物件概要の細かい文字を、業者欄と取り違えない */
 console.log('\n-- 「●」が「@」に化けた物件概要を業者欄にしない');
 const atBullet = await p.evaluate(() => window.__RE.findBandTop([

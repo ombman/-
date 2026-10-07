@@ -101,7 +101,7 @@ await p.setInputFiles('#fileInput',[path.join(FIX,'photo.pdf'), path.join(FIX,'h
 await p.waitForFunction(()=>document.getElementById('dropLog').textContent.split('作成しました').length>2,
   {timeout:300000});
 const cards = (await p.$$('#reviewArea [data-act="publish"]')).length;
-const thumbs = (await p.$$('#reviewArea img.sheet-thumb')).length;
+const thumbs = (await p.$$('#reviewArea img.sheet-thumb:not(.mk-sheet)')).length;
 ok('確認画面に2件出る', cards === 2, `${cards}件`);
 ok('確認画面に図面が2枚出る', thumbs >= 2, `${thumbs}枚`);
 await p.click('#btnPublishAll');
