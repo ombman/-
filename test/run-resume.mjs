@@ -122,7 +122,7 @@ const mid = await p4.evaluate(async () => {
            names: Array.prototype.map.call(document.querySelectorAll('[data-f="name"]'), e => e.value) };
 });
 console.log('\n途中で閉じる前:', mid.imgs + '枚の資料画像', mid.log.slice(-90));
-ok('作成中に「閉じても大丈夫」と出る', mid.log.indexOf('閉じても大丈夫') >= 0, mid.log.slice(-60));
+ok('作成中に「閉じても自動で再開する」と出る', mid.log.indexOf('自動で続きから再開') >= 0, mid.log.slice(-60));
 ok('途中で閉じる（全ページ終わる前）', mid.imgs < 5, `${mid.imgs}枚`);
 await p4.close();
 
@@ -131,6 +131,17 @@ p5.on('pageerror',e=>console.log('PAGEERROR',e.message));
 await p5.goto('http://127.0.0.1:8297/'+FILE+'?mode=admin');
 await p5.waitForFunction(()=>!!window.__RE);
 await p5.waitForFunction(() => document.querySelectorAll('[data-act="publish"]').length > 0, null, { timeout: 15000 }).catch(()=>{});
+/* ログインしなくても、開いただけで続きから作成が進む */
+const before5 = await p5.evaluate(async () => {
+  const t0 = Date.now();
+  while (Date.now()-t0 < 300000) {
+    if (document.getElementById('dropLog').textContent.indexOf('作成しました') >= 0) break;
+    await new Promise(r=>setTimeout(r,200));
+  }
+  return { done: document.getElementById('dropLog').textContent.indexOf('作成しました') >= 0,
+           loggedIn: !document.getElementById('adminBody').hidden };
+});
+ok('ログインしなくても、開いただけで続きから作成が終わる', before5.done && !before5.loggedIn, JSON.stringify(before5));
 await login(p5);
 const res5 = await p5.evaluate(async () => {
   const t0 = Date.now();
@@ -154,6 +165,38 @@ ok('一度に読み取った場合と同じ結果になる', JSON.stringify(res5
 const jobsLeft = await p5.evaluate(() => new Promise(r => { const q = indexedDB.open('reLpDrafts', 1);
   q.onsuccess = () => { const g = q.result.transaction('v1').objectStore('v1').getAllKeys(); g.onsuccess = () => r(g.result.filter(k => String(k).indexOf('job:') === 0).length); }; }));
 ok('終わったら保管したPDFを消す', jobsLeft === 0, `${jobsLeft}件`);
+
+/* --- 作成の途中でログアウトしても止まらず、ログインし直すと結果がそろっている --- */
+await p5.evaluate(() => { window.confirm = () => true; document.getElementById('btnDiscardAll').click(); });
+await p5.waitForTimeout(800);
+await p5.evaluate(async () => {
+  const buf = await (await fetch('/scanned.pdf')).arrayBuffer();
+  const dt = new DataTransfer();
+  dt.items.add(new File([buf],'scanned.pdf',{type:'application/pdf'}));
+  document.getElementById('dz').dispatchEvent(new DragEvent('drop',{dataTransfer:dt,bubbles:true}));
+  const t0 = Date.now();
+  while (Date.now()-t0 < 300000) {
+    if (/作成中… [12]／5ページ/.test(document.getElementById('dropLog').textContent)) break;
+    await new Promise(r=>setTimeout(r,100));
+  }
+  document.getElementById('btnLogout').click();
+});
+const lo = await p5.evaluate(async () => {
+  const last = () => { const l = document.getElementById('dropLog'); return l.lastElementChild ? l.lastElementChild.textContent : ''; };
+  const t0 = Date.now();
+  while (Date.now()-t0 < 300000) {
+    if (last().indexOf('作成しました') >= 0) break;
+    await new Promise(r=>setTimeout(r,200));
+  }
+  return { done: last().indexOf('作成しました') >= 0,
+           loggedOut: document.getElementById('adminBody').hidden };
+});
+ok('ログアウトしても作成は止まらず最後まで終わる', lo.done && lo.loggedOut, JSON.stringify(lo));
+await login(p5);
+await p5.waitForTimeout(500);
+const lo2 = await p5.evaluate(() => ({ drafts: JSON.stringify(window.__RE.__drafts().map(d => [d.page, d.name, d.why])), log: document.getElementById('dropLog').textContent.replace(/\s+/g,' ').slice(-300), cards: document.querySelectorAll('[data-act="publish"]').length,
+  imgs: document.querySelectorAll('img.sheet-thumb:not(.mk-sheet)').length }));
+ok('ログインし直すと、全ページの結果と資料画像がそろっている', lo2.cards === 5 && lo2.imgs === 5, JSON.stringify(lo2));
 
 console.log(`\n=== ${pass} 成功 / ${fail} 失敗 ===`);
 await b.close(); srv.close();

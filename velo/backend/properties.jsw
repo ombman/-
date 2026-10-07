@@ -177,7 +177,7 @@ function safeSheetImage(v) {
 const EXTRA_KEYS = ['address', 'line', 'layout', 'structure', 'floors', 'floorOn', 'roomNo', 'floorAreas',
   'landCategory', 'coverage', 'far', 'zoning', 'parking', 'status', 'rights', 'handover',
   'mgmtFee', 'repairFee', 'developer', 'manager', 'roadType', 'roadAccess', 'terrain',
-  'privateRoad', 'buildCondition', 'notes', 'points', 'expiry'];
+  'privateRoad', 'buildCondition', 'notes', 'points', 'expiry', 'crop'];
 const CONTACT = /[0-9]{2,4}[-ー－][0-9]{2,4}[-ー－][0-9]{3,4}|@|https?:\/\/|www\.|TEL|FAX|［削除済み］/i;
 function safeExtra(v) {
   let x = v;

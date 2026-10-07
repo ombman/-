@@ -250,6 +250,23 @@ ok('建物の項目がある資料は土地にしない', mk.ocrHouse.type !== '
 ok('マイソクに価格・所在地が載る', mk.html.indexOf('3,280') >= 0 && mk.html.indexOf('西宮市上鳴尾町13-18') >= 0 && mk.html.indexOf('7ecbee_44982cdc') >= 0, mk.html.slice(0, 80));
 ok('マイソクに業者の連絡先は載らない', !/06-1234-5678|サンプル不動産|梅田/.test(mk.html), '');
 
+console.log('\n-- マイソクに入れる範囲（写真・間取り図）を見つける');
+const vc = await p.evaluate(() => {
+  const c = document.createElement('canvas'); c.width = 1200; c.height = 850;
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 1200, 850);
+  x.fillStyle = '#000'; x.fillRect(0, 0, 1200, 3); x.fillRect(0, 90, 1200, 3);   /* 見出し欄 */
+  x.fillStyle = '#7a9'; x.fillRect(30, 120, 600, 300);                            /* 写真 */
+  x.fillStyle = '#000'; for (let i = 0; i < 18; i++) x.fillRect(790, 100 + i * 40, 400, 2);  /* 右の物件概要の表 */
+  x.fillRect(790, 100, 2, 700);
+  const none = document.createElement('canvas'); none.width = 800; none.height = 600;
+  const y = none.getContext('2d'); y.fillStyle = '#fff'; y.fillRect(0, 0, 800, 600); y.fillStyle = '#7a9'; y.fillRect(50, 50, 700, 500);
+  return { crop: window.__RE.findVisualCrop(c), none: window.__RE.findVisualCrop(none) };
+});
+{ const m = String(vc.crop).match(/;([0-9.]+),([0-9.]+),([0-9.]+),([0-9.]+)/);
+  ok('右側の物件概要の表を外し、写真の側だけにする', m && Number(m[1]) === 0 && Math.abs(Number(m[3]) - 790 / 1200) < 0.02, vc.crop);
+  ok('上の見出し欄（価格・物件名）も外す', m && Number(m[2]) > 0.09 && Number(m[2]) < 0.15, vc.crop);
+  ok('表が無い資料は全体を使う', vc.none === null, String(vc.none)); }
+
 /* スキャン資料で行頭の「●」が「@」と読まれた物件概要の細かい文字を、業者欄と取り違えない */
 console.log('\n-- 「●」が「@」に化けた物件概要を業者欄にしない');
 const atBullet = await p.evaluate(() => window.__RE.findBandTop([

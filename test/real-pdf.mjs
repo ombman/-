@@ -16,7 +16,7 @@ const srv=http.createServer((q,r)=>{const url=q.url.split('?')[0];
   const f=path.join(ROOT,url==='/'?FILE:url);
   if(!fs.existsSync(f)){r.writeHead(404);return r.end()}
   r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});r.end(fs.readFileSync(f));});
-await new Promise(r=>srv.listen(8299,'127.0.0.1',r));
+await new Promise(r=>srv.listen(+(process.env.PORT||8299),'127.0.0.1',r));
 const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
 const ctx=await b.newContext();
 await ctx.route('https://cdnjs.cloudflare.com/**',rt=>{
@@ -27,7 +27,7 @@ await ctx.route('https://cdnjs.cloudflare.com/**',rt=>{
 await routeOcr(ctx);
 const p=await ctx.newPage();
 p.on('pageerror',e=>console.log('PAGEERROR',e.message));
-await p.goto('http://127.0.0.1:8299/'+FILE);
+await p.goto('http://127.0.0.1:'+(process.env.PORT||8299)+'/'+FILE);
 await p.waitForFunction(()=>!!window.__RE);
 
 const res = await p.evaluate(async (only) => {
@@ -57,6 +57,11 @@ const res = await p.evaluate(async (only) => {
         if (rec.type !== 'house' && rec.type !== 'mansion') rec.type = merged.record.type;
       }
     }
+    if (im.layoutText) {
+      rec = Object.assign({}, rec, { extra: Object.assign({}, rec.extra || {}) });
+      const lx = RE.pickExtras(RE.redact(im.layoutText, []).text, rec);
+      Object.keys(lx).forEach(k => { rec.extra[k] = lx[k]; });
+    }
     if (rec.priceMan == null && im.ocrPrice != null && !RE.RENTAL_RE.test((r.rawText||'')+(im.ocrText||''))) rec = Object.assign({}, rec, { priceMan: im.ocrPrice });
     const pg = await pdf.getPage(r.pageNo);
     const vp = pg.getViewport({ scale: 1.6 });
@@ -66,7 +71,7 @@ const res = await p.evaluate(async (only) => {
     out.push({
       page: r.pageNo, noText: !!r.noText, textItems: (secs[r.pageNo-1]||'').replace(/\s/g,'').length,
       name: rec.name, type: rec.type, priceMan: rec.priceMan, walkMin: rec.walkMin, station: rec.station,
-      age: rec.ageYears, built: rec.builtLabel, landArea: rec.landArea, extra: rec.extra, ownArea: rec.ownArea, floorArea: rec.floorArea, share: rec.share,
+      age: rec.ageYears, built: rec.builtLabel, landArea: rec.landArea, extra: rec.extra, crop: im.visualCrop || null, layoutText: (im.layoutText || '').slice(0, 4000), ownArea: rec.ownArea, floorArea: rec.floorArea, share: rec.share,
       masked: im.masked, croppedPx: im.croppedPx, overPaint: im.overPaint,
       rawText: (secs[r.pageNo-1]||'').slice(0, 1500), ocrText: (im.ocrText||'').slice(0, 3000), ocrSparse: (im.ocrSparse||'').slice(0, 3000), ocrExtra: (im.ocrExtra||'').slice(0, 4000), ocrLabel: im.ocrLabel || null,
       orig: cv.toDataURL('image/jpeg', 0.7), outImg: im.dataUrl || null

@@ -109,7 +109,7 @@ await p.waitForFunction(()=>document.querySelectorAll('#admRows tr [data-del]').
 await p.click('#toPublic'); await p.waitForTimeout(600);
 const pub = await p.evaluate(()=>({
   cards: document.querySelectorAll('#pubGrid .card').length,
-  imgs: Array.prototype.filter.call(document.querySelectorAll('#pubGrid img.sheet-thumb'),
+  imgs: Array.prototype.filter.call(document.querySelectorAll('#pubGrid img.mk-sheet'),
         i => (i.getAttribute('src')||'').indexOf('data:image') === 0).length
 }));
 ok('ユーザー画面に2件出る', pub.cards === 2, `${pub.cards}件`);

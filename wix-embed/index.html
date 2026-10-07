@@ -174,7 +174,8 @@ table.list td.num{text-align:right;white-space:nowrap}
 .mk .f.r{justify-content:flex-end}.mk .f.c{justify-content:center}
 .mk .f.w{color:#fff;font-weight:700}
 .mk .f.multi{white-space:pre-wrap;align-items:flex-start;line-height:1.5;overflow:hidden}
-.mk img.mk-sheet{position:absolute;object-fit:contain;background:#fff;cursor:zoom-in}
+.mk img.mk-sheet{position:absolute;object-fit:contain;background:#fff}
+.viewer.zoomed .mk-big{width:200vw;max-width:none}
 .viewer .mk-big{width:min(96vw,calc(92vh * 1123 / 794));max-width:1400px}
 textarea.ng{width:100%;min-height:74px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;resize:vertical}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:var(--accent);
@@ -1418,7 +1419,7 @@ function pickDetails(t) {
 var EXTRA_KEYS = ['address', 'line', 'layout', 'structure', 'floors', 'floorOn', 'roomNo', 'floorAreas',
   'landCategory', 'coverage', 'far', 'zoning', 'parking', 'status', 'rights', 'handover',
   'mgmtFee', 'repairFee', 'developer', 'manager', 'roadType', 'roadAccess', 'terrain',
-  'privateRoad', 'buildCondition', 'notes', 'points', 'expiry'];
+  'privateRoad', 'buildCondition', 'notes', 'points', 'expiry', 'crop'];
 var EXTRA_LABEL = {
   address: '所在地', line: '路線（例：阪神本線）', layout: '間取り', structure: '建物構造',
   floors: '規模（例：2階建）', floorOn: '所在階（例：6階）', roomNo: '部屋番号（例：403）',
@@ -1466,6 +1467,9 @@ function pickLandArea(t) {
 function pickExtras(t, rec) {
   var s = zen2han(String(t || '')).replace(/\r/g, '');
   s = s.replace(/酉宮/g, '西宮').replace(/兵[庵康唐]県/g, '兵庫県').replace(/([ァ-ヶ])[-一－]([ァ-ヶ])/g, '$1ー$2');
+  /* 表の見出しは「管 理 費」「所 在 地」のように1文字ずつ空いていることが多い。
+     日本語の文字の間の1つだけの空白は詰める（2つ以上の空白は欄の区切りとして残す） */
+  for (var sp = 0; sp < 3; sp++) s = s.replace(/([一-龥ぁ-んァ-ヶー])[ 　](?=[一-龥ぁ-んァ-ヶー])/g, '$1');
   var x = {};
   /* 所在地：業者欄の会社の住所（〒・TEL・免許の近く、伏せ字の近く）は使わない */
   var are = /(?:所\s*在\s*地|住居表示|住\s*所)[\s　]*[:：／/]?[\s　]*([^\n]{1,60})/g, am;
@@ -1473,15 +1477,29 @@ function pickExtras(t, rec) {
     var near = s.slice(Math.max(0, am.index - 40), am.index + am[0].length + 40);
     if (/〒|TEL|FAX|免許|宅建|事務所|本社|本店|支店|営業所/.test(near) || near.indexOf(MASK) >= 0) continue;
     var av = extraClean(String(am[1]).replace(/^[】」』\]）)]+/, ''), 40);
-    var ak = av && av.match(/^[^\s]*?[市区町村郡][^\s]*?(?:[0-9]+(?:[-－の][0-9]+)*(?:番地?|号)?|丁目|町|番地?)(?![0-9])/);
+    var ak = av && av.match(/^[^\s]*?[市区町村郡][^\s]*(?:[0-9]+(?:[-－の][0-9]+)*(?:番地?|号)?|丁目|町|番地?)(?![0-9])/);
     if (ak) { x.address = ak[0]; break; }
+  }
+  if (!x.address) {
+    /* 表の欄の中で、値が見出しの1行上・下にずれて出てくることがある（「所在地」だけの行） */
+    var ls2 = s.split('\n');
+    for (var li2 = 0; li2 < ls2.length && !x.address; li2++) {
+      if (!/^[\s　]*(?:所\s*在\s*地|住居表示)[\s　]*$/.test(ls2[li2])) continue;
+      [ls2[li2 - 1], ls2[li2 + 1]].forEach(function (cand) {
+        if (x.address || !cand) return;
+        var cv = extraClean(cand, 40);
+        var ck = cv && /^[^\s]{0,4}[都道府県]?[^\s]*?[市区町村郡]/.test(cv) &&
+                 cv.match(/^[^\s]*?[市区町村郡][^\s]*(?:[0-9]+(?:[-－の][0-9]+)*(?:番地?|号)?|丁目|町|番地?)(?![0-9])/);
+        if (ck) x.address = ck[0];
+      });
+    }
   }
   if (!x.address && typeof pickAddressOcr === 'function') x.address = pickAddressOcr(s);
   /* 路線：駅名の直前の「〇〇線」 */
   if (rec && rec.station) {
     var st = String(rec.station).replace(/駅$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     var lm = s.match(new RegExp('((?:JR|ＪＲ)?[^\\s「」『』●・、。:：/／()（）]{0,10}?線)[\\s　]*[「『]?[\\s　]*' + st));
-    if (lm) x.line = extraClean(lm[1].replace(/^R(?=[^\s]*線)/, 'JR'), 16);
+    if (lm) x.line = extraClean(lm[1].replace(/^.*?(?:交通|沿線|路線|最寄り?|利用)[:：]?/, '').replace(/^R(?=[^\s]*線)/, 'JR'), 16);
   }
   var lay = s.match(/間\s*取り?[\s:：]*([1-9]?\s*S?L?D?K(?:\s*[+＋]\s*[0-9]?\s*(?:S|納戸|N|サービスルーム|WIC))?)/) ||
             s.match(/(?:^|[^0-9A-Za-z])([1-9]\s*S?L?D?K(?:\s*[+＋]\s*[0-9]?\s*(?:S|納戸|N|サービスルーム))?)(?![A-Za-z])/);
@@ -1512,6 +1530,7 @@ function pickExtras(t, rec) {
   var pk = labelValue(s, '駐\\s*車\\s*場', 30);
   var pkm = pk && pk.match(/^(?:空き?(?:有|無|あり|なし)|有|無|あり|なし|[0-9]+台(?:可|分)?)(?:\s*[(（][^)）]{0,20}[)）])?/);
   if (pkm) x.parking = pkm[0];
+  if (!x.parking) { var pk2 = s.match(/駐車場[^\n]{0,8}?(空き?(?:有|無|あり|なし))/); if (pk2) x.parking = pk2[1]; }
   var sk = (labelValue(s, '現\\s*況', 12) || '').match(/空家|空き家|空室|居住中|賃貸中|更地|古家あり|建築中|完成済|未完成|使用中/) ||
            s.match(/現\s*況[^\n]{0,6}?(空家|空き家|空室|居住中|賃貸中|更地|古家あり|建築中|完成済|未完成)/);
   if (sk) x.status = sk[1] || sk[0];
@@ -1520,6 +1539,11 @@ function pickExtras(t, rec) {
   var hv = labelValue(s, '引\\s*渡(?:し)?(?:時期|日|可能日|可能時期)?|入居(?:時期|可能日)', 20);
   var hm = hv && hv.match(/^(?:応?相談|即時|即日|即入居可?|現況|引渡猶予[^\s]{0,8}|(?:[0-9]{4}年)?[0-9]{1,2}月(?:上旬|中旬|下旬|末)?(?:予定)?|令和[0-9]+年[0-9]{1,2}月(?:上旬|中旬|下旬)?)/);
   if (hm) x.handover = hm[0];
+  if (!x.handover) {
+    /* 「引渡」の見出しの下に「時期 即時」と分かれて書かれる表 */
+    var h2 = s.match(/(?:引\s*渡[^\n]{0,10}?)?時\s*期[\s:：]*(応?相談|即時|即日|即入居可?|(?:[0-9]{4}年)?[0-9]{1,2}月(?:上旬|中旬|下旬|末)?)/);
+    if (h2) x.handover = h2[1];
+  }
   var mf = s.replace(/([0-9]),([0-9]{3})/g, '$1$2').match(/管理費(?:等)?[^0-9\n]{0,10}([0-9]{3,7})\s*円/);
   if (mf) x.mgmtFee = mf[1];
   var rf = s.replace(/([0-9]),([0-9]{3})/g, '$1$2').match(/修繕積立金[^0-9\n]{0,10}([0-9]{3,7})\s*円/);
@@ -2974,7 +2998,12 @@ function renderRedactedPage(page, extraWords, scale, forceOcr, turn) {
         out = c2;
       }
       var enc = encodeWithinBudget(out);
+      /* マイソクの中央に入れる範囲（写真・間取り図・アピール文の所）。右側の物件概要の表は
+         値をマイソクに転記するので、画像からは外す */
+      var visualCrop = null;
+      try { visualCrop = findVisualCrop(out); } catch (e) { visualCrop = null; }
       return {
+        visualCrop: visualCrop,
         dataUrl: enc.dataUrl,
         width: enc.width, height: enc.height,
         fits: enc.fits !== false,
@@ -2993,10 +3022,119 @@ function renderRedactedPage(page, extraWords, scale, forceOcr, turn) {
         ocrExtra: ocrExtra,     /* 表の罫線を消して読み直した結果（項目が足りないページだけ） */
         ocrLabel: ocrLabel,     /* 見出しのすぐ右・下を読み直した値 {name, area, floor, price} */
         ocrPriceSure: ocrPriceSure,   /* 価格を数字専用の辞書で読めた */
-        ocrPrice: ocrPrice   /* 文字認識で大きな字として読めた価格（無ければ null） */
+        ocrPrice: ocrPrice,  /* 文字認識で大きな字として読めた価格（無ければ null） */
+        /* 文字データを紙面の位置どおりに行ごとに並べ直した文字（表の見出しと値を同じ行で読むため） */
+        layoutText: items.length >= 8 ? rowsText(items) : null
       };
       }
     });
+}
+
+/* 文字データ（位置つき）を、紙面の行ごとに左から右へ並べた文字にする。
+   様式の決まった物件概要の表は、文字データの順番では見出しと値が離れて出てくる
+   （「修繕積立金11,150 9,070」）。位置で並べ直すと「管理費 11,150 円/月 修繕積立金 9,070 円/月」になる。
+   大きく離れた所には2つの空白を入れ、欄の区切りが分かるようにする。 */
+function rowsText(items) {
+  var its = items.filter(function (it) { return it && String(it.str || '').trim(); })
+    .slice().sort(function (a, b) { return a.cy - b.cy || a.x - b.x; });
+  /* 同じ行＝縦の範囲が重なるもの（表の欄の中で値が見出しより少し上下にずれていても同じ行にする） */
+  var rows = [];
+  its.forEach(function (it) {
+    var top = it.cy - it.h, bot = it.cy;
+    for (var ri = rows.length - 1; ri >= 0 && ri >= rows.length - 3; ri--) {
+      var r = rows[ri];
+      var ov = Math.min(r.bot, bot) - Math.max(r.top, top);
+      if (ov >= Math.min(r.bot - r.top, it.h) * 0.4) {
+        r.list.push(it); r.top = Math.min(r.top, top); r.bot = Math.max(r.bot, bot); return;
+      }
+    }
+    rows.push({ top: top, bot: bot, list: [it] });
+  });
+  return rows.map(function (r) {
+    r.list.sort(function (a, b) { return a.x - b.x; });
+    var out = '', prev = null;
+    r.list.forEach(function (it) {
+      if (prev) {
+        var gap = it.x - (prev.x + prev.w), h = Math.max(4, Math.min(prev.h, it.h));
+        out += gap > h * 1.2 ? '  ' : gap > h * 0.3 ? ' ' : '';
+      }
+      out += it.str; prev = it;
+    });
+    return out;
+  }).join('\n');
+}
+
+/* 資料のうち、写真・間取り図・アピール文が載っている範囲を探す。
+   販売図面は、片側（多くは右）に横罫線がたくさん並ぶ物件概要の表があり、
+   残りの側に写真・間取り図が並ぶ。表の端より外側を、その範囲とする。
+   上端は、その範囲の幅いっぱいに引かれた罫線のうち、ページ上部（30%まで）でいちばん下のもの
+   （価格・物件名の見出し欄の下端）。表が見つからなければ null（資料全体を使う）。
+   戻り値は「縦横比;左,上,右,下」（それぞれ0〜1の割合）の文字列。 */
+function findVisualCrop(src) {
+  var W = 600, H = Math.round(src.height * W / src.width);
+  if (H < 50) return null;
+  var c = document.createElement('canvas'); c.width = W; c.height = H;
+  var cx = c.getContext('2d', { willReadFrequently: true });
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, W, H);
+  cx.drawImage(src, 0, 0, W, H);
+  var d = cx.getImageData(0, 0, W, H).data;
+  var runs = [];
+  for (var y = 0; y < H; y++) {
+    var run = 0;
+    for (var x = 0; x <= W; x++) {
+      var dark = false;
+      if (x < W) { var i = (y * W + x) * 4; dark = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2] < 200; }
+      if (dark) { run++; continue; }
+      if (run >= W * 0.12) runs.push({ y: y, x0: x - run, x1: x - 1 });
+      run = 0;
+    }
+  }
+  if (!runs.length) return null;
+  /* 左端・右端がそろった罫線を数える（同じ線の太さで続く行は1本と数える） */
+  /* 表の行は、見出しの列の有無で左端が少しずれることがあるので、
+     右側の表は右端、左側の表は左端がそろった罫線をまとめて数える */
+  var group = function (list, key) {
+    var gs = [];
+    list.forEach(function (r) {
+      var g = gs.filter(function (g) { return Math.abs(g.k - r[key]) <= 9; })[0];
+      if (!g) { g = { k: r[key], rs: [], ys: [] }; gs.push(g); }
+      g.rs.push(r);
+      if (!g.ys.length || r.y - g.ys[g.ys.length - 1] > 3) g.ys.push(r.y);
+      else g.ys[g.ys.length - 1] = r.y;
+    });
+    return gs.filter(function (g) { return g.ys.length >= 6; });
+  };
+  var right = group(runs.filter(function (r) { return r.x0 > W * 0.35 && r.x1 > W * 0.8; }), 'x1');
+  var left = group(runs.filter(function (r) { return r.x0 < W * 0.2 && r.x1 < W * 0.65 && r.x1 > W * 0.2; }), 'x0');
+  var vx0, vx1;
+  /* 表の端＝表の横罫線が最も多く始まる位置。間取り図の壁が表の罫線とつながって
+     少数の長い線になることがあるが、表の罫線の本数にはかなわない */
+  var mode = function (gs, key) {
+    var vals = [];
+    gs.forEach(function (g) { g.rs.forEach(function (r) { vals.push(r[key]); }); });
+    var best = null, bestN = 0;
+    vals.forEach(function (v) {
+      var n = vals.filter(function (w) { return Math.abs(w - v) <= 6; }).length;
+      if (n > bestN || (n === bestN && best != null && v < best)) { best = v; bestN = n; }
+    });
+    return bestN >= 3 ? best : null;
+  };
+  if (right.length && mode(right, 'x0') != null) {
+    vx0 = 0;
+    vx1 = mode(right, 'x0') - 3;
+  } else if (left.length && mode(left, 'x1') != null) {
+    vx0 = mode(left, 'x1') + 3;
+    vx1 = W - 1;
+  } else return null;
+  if (vx1 - vx0 < W * 0.3) return null;
+  /* 上端：範囲の幅の8割以上にわたる罫線のうち、上から30%までにある最も下のもの */
+  var top = 0;
+  runs.forEach(function (r) {
+    var cover = Math.min(r.x1, vx1) - Math.max(r.x0, vx0);
+    if (r.y < H * 0.3 && cover >= (vx1 - vx0) * 0.8 && r.y + 2 > top) top = r.y + 2;
+  });
+  var f = function (v, m) { return Math.max(0, Math.min(1, v / m)).toFixed(4); };
+  return (src.width / src.height).toFixed(4) + ';' + f(vx0, W) + ',' + f(top, H) + ',' + f(vx1, W) + ',' + f(H, H);
 }
 
 /* PDF全体のページ画像をつくる */
@@ -3106,6 +3244,15 @@ function renderRedactedPdf(file, extraWords, opts) {
          1ページ数秒かかるため、全ページ待つと数分画面が止まって見える。
          ページ単位で呼び出し側に渡し、その場で確認画面へ反映させる。 */
       var onPage = opts && opts.onPage;
+      /* 複数ページを同時に処理する（文字認識の作業役の数まで）。各ページの結果は
+         ページ番号で物件に結びつくので、終わる順番が前後しても問題ない */
+      var lanes = Math.max(1, Ocr.available() ? Ocr.size() : 1);
+      var runs = [];
+      for (var li = 0; li < lanes; li++) runs.push(next());
+      return Promise.all(runs).then(function () {
+        out.sort(function (a, b) { return a.pageNo - b.pageNo; });
+        return out;
+      });
       function next() {
         if (i > pdf.numPages) return Promise.resolve(out);
         if (opts && opts.stop && opts.stop()) return Promise.resolve(out);
@@ -3141,7 +3288,6 @@ function renderRedactedPdf(file, extraWords, opts) {
           })
           .catch(function () { return next(); });   /* 1ページ失敗しても続ける */
       }
-      return next();
     });
 }
 
@@ -3271,12 +3417,57 @@ var Ocr = {
     }).catch(function (e) { self.digitsLoading = null; self.digitsFailed = true; throw e; });
     return self.digitsLoading;
   },
-  readDigits: function (canvas, psm) {
-    return this.loadDigits().then(function (w) {
-      return w.setParameters({ tessedit_pageseg_mode: psm || '7' }).then(function () {
-        return w.recognize(canvas, {}, { text: true, blocks: true });
+  /* 文字認識の作業役を複数持ち、複数ページを同時に読む（処理を速くするため）。
+     数はパソコンの処理能力に合わせて1〜3。1つの作業役は同時に1つの読み取りだけを受け持つ
+     （読み方の設定を読み取りごとに切り替えるため、取り合いにならないよう貸し出し制にする） */
+  size: function () {
+    var c = navigator.hardwareConcurrency || 2;
+    return Math.max(1, Math.min(3, c - 1));
+  },
+  pools: {},
+  lease: function (kind) {
+    var self = this;
+    var P = self.pools[kind] || (self.pools[kind] = { all: [], free: [], wait: [], making: 0, noMore: false });
+    if (P.free.length) return Promise.resolve(P.free.pop());
+    var first = kind === 'd' ? self.loadDigits() : self.load();
+    if (!P.all.length && !P.making) {
+      P.making++;
+      return first.then(function (w) { P.making--; P.all.push(w); return w; },
+                        function (e) { P.making--; throw e; });
+    }
+    if (!P.noMore && P.all.length + P.making < self.size()) {
+      P.making++;
+      return first.then(function () {
+        return window.Tesseract.createWorker(kind === 'd' ? 'eng' : 'jpn', 1, {
+          workerPath: CONFIG.TESS_WORKER, corePath: CONFIG.TESS_CORE,
+          langPath: kind === 'd' ? CONFIG.TESS_LANG_DIGITS : CONFIG.TESS_LANG
+        });
+      }).then(function (w) {
+        return kind === 'd' ? w.setParameters({ tessedit_char_whitelist: '0123456789,.' }).then(function () { return w; }) : w;
+      }).then(function (w) { P.making--; P.all.push(w); return w; }, function () {
+        /* 追加の作業役を作れない（メモリ不足など）ときは、今ある作業役を順番に使う */
+        P.making--; P.noMore = true;
+        return new Promise(function (res) { P.wait.push(res); });
       });
-    }).then(function (r) {
+    }
+    return new Promise(function (res) { P.wait.push(res); });
+  },
+  giveBack: function (kind, w) {
+    var P = this.pools[kind];
+    if (!P) return;
+    if (P.wait.length) P.wait.shift()(w); else P.free.push(w);
+  },
+  run: function (kind, psm, canvas) {
+    var self = this;
+    return self.lease(kind).then(function (w) {
+      return w.setParameters({ tessedit_pageseg_mode: psm }).then(function () {
+        return w.recognize(canvas, {}, { text: true, blocks: true });
+      }).then(function (r) { self.giveBack(kind, w); return r; },
+              function (e) { self.giveBack(kind, w); throw e; });
+    });
+  },
+  readDigits: function (canvas, psm) {
+    return this.run('d', psm || '7', canvas).then(function (r) {
       var d = (r && r.data) || {}, out = [];
       (d.blocks || []).forEach(function (b) {
         (b.paragraphs || []).forEach(function (pg) {
@@ -3301,11 +3492,7 @@ var Ocr = {
      '11'＝散らばった文字を1つずつ拾う。販売図面は表や写真の間に文字が
      散らばっているため、'11' のほうが価格・物件名を正しく拾えることが多い。 */
   read: function (canvas, psm) {
-    return this.load().then(function (w) {
-      return w.setParameters({ tessedit_pageseg_mode: psm || '6' }).then(function () {
-        return w.recognize(canvas, {}, { text: true, blocks: true });
-      });
-    }).then(function (r) {
+    return this.run('j', psm || '6', canvas).then(function (r) {
       var d = (r && r.data) || {}, lines = [];
       (d.blocks || []).forEach(function (b) {
         (b.paragraphs || []).forEach(function (pg) {
@@ -3351,8 +3538,11 @@ var Ocr = {
     });
   },
   stop: function () {
-    var w = this.worker; this.worker = null; this.loading = null;
-    if (w && w.terminate) { try { w.terminate(); } catch (e) {} }
+    var self = this, all = [];
+    Object.keys(self.pools).forEach(function (k) { all = all.concat(self.pools[k].all); });
+    if (self.worker && all.indexOf(self.worker) < 0) all.push(self.worker);
+    self.pools = {}; self.worker = null; self.loading = null; self.digits = null; self.digitsLoading = null;
+    all.forEach(function (w) { if (w && w.terminate) { try { w.terminate(); } catch (e) {} } });
   }
 };
 
@@ -3621,9 +3811,13 @@ var MK_LAYOUT = {
 };
 function mkNum(v) { return v == null || v === '' || isNaN(Number(v)) ? '' : Number(v).toLocaleString('ja-JP'); }
 /* マイソクに載せる文字（1項目ずつ）。値が無ければ空欄 */
-function mkValues(p) {
+function mkExtra(p) {
   var x = p.extra || {};
   if (typeof x === 'string') { try { x = JSON.parse(x) || {}; } catch (e) { x = {}; } }
+  return x;
+}
+function mkValues(p) {
+  var x = mkExtra(p);
   var st = p.station ? String(p.station).replace(/駅$/, '') : '';
   var access = st ? (x.line || '') + '「' + st + '駅」' + (p.walkMin != null ? '徒歩' + p.walkMin + '分' : '')
                   : (p.walkMin != null ? '徒歩' + p.walkMin + '分' : '');
@@ -3665,7 +3859,24 @@ function maisokuHtml(p, opts) {
   MK_LAYOUT[t].forEach(function (e) {
     var box = 'left:' + e.x + 'px;top:' + e.y + 'px;width:' + e.w + 'px;height:' + e.h + 'px;';
     if (e.k === 'sheet') {
-      if (p.sheetImage) parts.push('<img class="mk-sheet sheet-thumb" src="' + esc(p.sheetImage) + '" alt="物件資料（クリックで拡大）" style="' + box + '">');
+      if (!p.sheetImage) return;
+      /* 資料のうち写真・間取り図の範囲（右側の物件概要の表は値を転記するので載せない） */
+      var cm = String((mkExtra(p).crop) || '').match(/^([0-9.]+);([0-9.]+),([0-9.]+),([0-9.]+),([0-9.]+)$/);
+      if (cm) {
+        var asp = Number(cm[1]), x0 = Number(cm[2]), y0 = Number(cm[3]), x1 = Number(cm[4]), y1 = Number(cm[5]);
+        var cw = (x1 - x0) * asp, ch = (y1 - y0);
+        if (cw > 0 && ch > 0) {
+          var sc = Math.min(e.w / cw, e.h / ch);
+          var iw = asp * sc, ih = sc;
+          var ox = (e.w - cw * sc) / 2, oy = (e.h - ch * sc) / 2;
+          parts.push('<div style="position:absolute;overflow:hidden;left:' + (e.x + ox).toFixed(1) + 'px;top:' + (e.y + oy).toFixed(1) +
+            'px;width:' + (cw * sc).toFixed(1) + 'px;height:' + (ch * sc).toFixed(1) + 'px">' +
+            '<img class="mk-sheet" src="' + esc(p.sheetImage) + '" alt="物件の写真・間取り図" style="position:absolute;max-width:none;left:' +
+            (-x0 * iw).toFixed(1) + 'px;top:' + (-y0 * ih).toFixed(1) + 'px;width:' + iw.toFixed(1) + 'px;height:' + ih.toFixed(1) + 'px"></div>');
+          return;
+        }
+      }
+      parts.push('<img class="mk-sheet" src="' + esc(p.sheetImage) + '" alt="物件資料" style="' + box + '">');
       return;
     }
     var text = v[e.k] || '';
@@ -3791,9 +4002,16 @@ document.addEventListener('keydown', function (e) {
 document.addEventListener('click', function (e) {
   var img = e.target.closest ? e.target.closest('.sheet-thumb') : null;
   if (img && img.tagName === 'IMG') { e.preventDefault(); openViewer(img.src); return; }
-  /* マイソクの資料画像以外の所を押したら、マイソクを大きく表示する */
+  /* マイソクを押したら（タップしたら）、Canvaのマイソクを画面いっぱいに大きく表示する。
+     大きく表示した中で押すと、さらに拡大／元に戻す */
   var mk = e.target.closest ? e.target.closest('.mk-wrap') : null;
-  if (mk && !viewerMk.contains(mk)) { e.preventDefault(); openMaisoku(mk.outerHTML); }
+  if (mk && viewerMk.contains(mk)) {
+    e.preventDefault();
+    viewer.classList.toggle('zoomed');
+    fitMaisoku(viewerMk);
+    return;
+  }
+  if (mk) { e.preventDefault(); openMaisoku(mk.outerHTML); }
 });
 
 /* =================================================================
@@ -3834,18 +4052,20 @@ function doLogin() {
     document.getElementById('btnLogout').hidden = false;
     setModeBadge();
     refresh();
+    renderReview();
     resumeJobs();
   });
 }
 document.getElementById('btnLogin').addEventListener('click', doLogin);
 document.getElementById('pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 document.getElementById('btnLogout').addEventListener('click', function () {
-  authToken = null; drafts = []; archive = []; jobGen++;
+  /* ログアウトしても、読み込んだ資料の画像作成・文字認識は止めずに続ける。
+     下書き（読み取り結果）も残し、次にログインしたらそのまま確認・掲載できる */
+  authToken = null; archive = [];
   document.getElementById('adminBody').hidden = true;
   document.getElementById('btnLogout').hidden = true;
   document.getElementById('adminLogin').hidden = false;
   document.getElementById('pw').value = '';
-  document.getElementById('reviewArea').innerHTML = '';
   document.getElementById('archiveArea').innerHTML = '';
 });
 
@@ -3943,7 +4163,7 @@ function handleFiles(fileList) {
    残りのページから再開する（ブラウザの仕組み上、閉じている間は処理できない） */
 var jobGen = 0;   /* 「すべて破棄」で増やし、動いている処理を止める */
 var unsavedJobs = 0;   /* 保管できなかった処理の数（閉じると失われるので引き止める） */
-var CLOSE_OK = '（この画面は閉じても大丈夫です。次に管理画面でログインすると続きから再開します）';
+var CLOSE_OK = '（ログアウトしても処理は続きます。画面を閉じた場合も、次にこのページを開くと自動で続きから再開します）';
 function runPdfJob(file, line, ocrPages, only, onSaved) {
   var gen = jobGen, saved = false;
   var keep = DraftStore.saveJob(file.name, file, ocrPages)
@@ -4004,6 +4224,19 @@ function runPdfJob(file, line, ocrPages, only, onSaved) {
         }
         d.res.ocrPending = false;
         d.res.sheet = im;
+        /* 文字データのあるページは、紙面の位置どおりに並べた文字で表の値を読み直す
+           （見出しの右にある値を正しく結び付けられるので、こちらを優先する） */
+        d.res.record.extra = d.res.record.extra || {};
+        if (im.layoutText) {
+          var lx = pickExtras(redact(im.layoutText, ngWords()).text, d.res.record);
+          Object.keys(lx).forEach(function (k) { d.res.record.extra[k] = lx[k]; });
+          if (d.res.record.landArea == null && d.res.record.type !== 'mansion') {
+            var la = pickLandArea(redact(im.layoutText, ngWords()).text);
+            if (la != null) d.res.record.landArea = la;
+          }
+        }
+        /* マイソクの中央に入れる範囲（写真・間取り図の所） */
+        if (im.visualCrop) d.res.record.extra.crop = im.visualCrop; else delete d.res.record.extra.crop;
 
         if (im.fits === false) {
           /* 画質を落としても大きすぎる資料。掲載すると保存時に弾かれるため付けない */
@@ -4729,7 +4962,7 @@ document.getElementById('admRows').addEventListener('click', function (e) {
 /* --- 前回の読み取り途中の下書きを戻す ---
    資料が多いと文字認識に数分かかる。その途中で画面を閉じても
    作業が消えないよう、保管しておいた下書きから再開できるようにする。 */
-var pendingJobs = [];   /* 途中で閉じた資料画像の作成。ログインしたら続きから再開する */
+var pendingJobs = [];   /* 途中で閉じた資料画像の作成。ページを開いたら続きから再開する */
 Promise.all([DraftStore.load(), DraftStore.loadJobs()]).then(function (got) {
   var saved = got[0], jobs = got[1] || [];
   if (!saved || !saved.drafts || !saved.drafts.length || drafts.length) {
@@ -4760,10 +4993,11 @@ Promise.all([DraftStore.load(), DraftStore.loadJobs()]).then(function (got) {
     line.className = 'ok';
     line.innerHTML = '前回の読み取り結果 <b>' + saved.drafts.length + '件</b>を戻しました（' +
       hh + ':' + mm + ' 時点）。続きから確認・掲載できます。' +
-      (pendingJobs.length ? '<br>資料画像の作成が途中だった資料は、ログインすると続きから再開します。' : '');
+      (pendingJobs.length ? '<br>資料画像の作成が途中だった資料は、自動で続きから再開しています（ログインは不要です）。' : '');
     log.insertBefore(line, log.firstChild);
   }
-  if (authToken) resumeJobs();
+  /* ログインを待たずに、ページを開いた時点で続きから再開する */
+  resumeJobs();
 }).catch(function () {});
 
 /* 途中だった資料画像の作成を、終わっていないページから再開する（1資料ずつ） */
@@ -4862,7 +5096,7 @@ window.__RE = {
   mergeOcrResult: mergeOcrResult, voteOcrPrice: voteOcrPrice, pickNameOcr: pickNameOcr, Ocr: Ocr,
   pickPriceByText: pickPriceByText, tightenText: tightenText, pickAddressOcr: pickAddressOcr, Store: Store,
   pickWalkDict: pickWalkDict, matchStation: matchStation, removeRules: removeRules, pickStationDict: pickStationDict,
-  maisokuHtml: maisokuHtml, fitMaisoku: fitMaisoku, mkValues: mkValues, pickExtras: pickExtras, pickLandArea: pickLandArea,
+  maisokuHtml: maisokuHtml, fitMaisoku: fitMaisoku, findVisualCrop: findVisualCrop, rowsText: rowsText, mkValues: mkValues, pickExtras: pickExtras, pickLandArea: pickLandArea,
   readByLabels: readByLabels, cropForRead: cropForRead, unslant: unslant, fontsLoaded: fontsLoaded, allFontsEmbedded: allFontsEmbedded,
   /* 検証用：確認待ちの物件の状態（掲載できない理由・保存する大きさ） */
   __drafts: function () {
