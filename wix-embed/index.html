@@ -3132,8 +3132,15 @@ function findVisualCrop(src) {
       }
       return best >= H * 0.4;
     };
+    /* 表の外枠は、表の横罫線がそこから始まる（つながっている）。間取り図の壁など、
+       表の罫線がつながっていない縦線は外枠にしない */
+    var joins = function (x) {
+      var n = 0;
+      right.forEach(function (g) { g.rs.forEach(function (r) { if (Math.abs(r.x0 - x) <= 4) n++; }); });
+      return n >= 2;
+    };
     for (var vx = Math.max(0, Math.round(m0 - W * 0.06)); vx < m0 - 2; vx++) {
-      if (vlong(vx)) { vx1 = vx - 3; break; }
+      if (vlong(vx) && joins(vx)) { vx1 = vx - 3; break; }
     }
   } else if (left.length && mode(left, 'x1') != null) {
     vx0 = mode(left, 'x1') + 3;
@@ -3146,8 +3153,60 @@ function findVisualCrop(src) {
     var cover = Math.min(r.x1, vx1) - Math.max(r.x0, vx0);
     if (r.y < H * 0.3 && cover >= (vx1 - vx0) * 0.8 && r.y + 2 > top) top = r.y + 2;
   });
+  /* 範囲を囲む枠線（資料の外枠・欄の罫線）は載せない。端から内側へ少しの幅だけ見て、
+     細い線（すぐ内側は白い）が範囲の大部分にわたって引かれていれば、その内側で切る。
+     写真の端のように内側も濃いものは線ではないので切らない */
+  var bot = H;
+  var isDark = function (x, y) { var k = (y * W + x) * 4; return 0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2] < 200; };
+  var colRun = function (x, y0, y1) {
+    var best = 0, run = 0;
+    for (var yy = y0; yy < y1; yy++) { if (isDark(x, yy)) { if (++run > best) best = run; } else run = 0; }
+    return best;
+  };
+  var rowRun = function (y, x0, x1) {
+    var best = 0, run = 0;
+    for (var xx = x0; xx <= x1; xx++) { if (isDark(xx, y)) { if (++run > best) best = run; } else run = 0; }
+    return best;
+  };
+  /* 端から内側へ見て、最初に見つかった線（二重線ならその内側の線まで）だけを外す。
+     その先にある線（間取り図の壁など）は内容なので残す */
+  var trimEdge = function (from, to, step, isLine, hasInk) {
+    var edge = null, last = null;
+    for (var v = from; step > 0 ? v < to : v > to; v += step) {
+      if (isLine(v)) { last = v; edge = v + step * 2; continue; }
+      if (last != null && Math.abs(v - last) > 3) break;
+      /* 文字や写真などの内容に行き当たったら、それより内側は見ない（内容を削らない） */
+      if (hasInk(v)) break;
+    }
+    return edge;
+  };
+  var trimRows = function () {
+    var span = vx1 - vx0;
+    var line = function (yy, inward) {
+      return rowRun(yy, vx0, vx1) >= span * 0.6 && rowRun(Math.max(0, Math.min(H - 1, yy + inward * 4)), vx0, vx1) < span * 0.3;
+    };
+    var ink = function (yy) { return rowRun(yy, vx0, vx1) > 3 && !line(yy, 1) && !line(yy, -1); };
+    var t = trimEdge(top, Math.min(bot - 1, top + Math.round(H * 0.03)), 1, function (yy) { return line(yy, 1); }, ink);
+    if (t != null) top = t;
+    var b2 = trimEdge(bot - 1, Math.max(top + 1, bot - Math.round(H * 0.04)), -1, function (yy) { return line(yy, -1); }, ink);
+    if (b2 != null) bot = b2;
+  };
+  var trimCols = function () {
+    var span = bot - top;
+    var line = function (xx, inward) {
+      return colRun(xx, top, bot) >= span * 0.5 && colRun(Math.max(0, Math.min(W - 1, xx + inward * 4)), top, bot) < span * 0.3;
+    };
+    var cink = function (xx) { return colRun(xx, top, bot) > 3 && !line(xx, 1) && !line(xx, -1); };
+    var l = trimEdge(vx0, Math.min(vx1 - 1, vx0 + Math.round(W * 0.05)), 1, function (xx) { return line(xx, 1); }, cink);
+    if (l != null) vx0 = l;
+    var r2 = trimEdge(vx1, Math.max(vx0 + 1, vx1 - Math.round(W * 0.05)), -1, function (xx) { return line(xx, -1); }, cink);
+    if (r2 != null) vx1 = r2;
+  };
+  if (window.__RE_DEBUG) window.__cropDbg = { vx0: vx0, vx1: vx1, top: top, W: W };
+  trimRows(); trimCols(); trimRows();
+  if (vx1 - vx0 < W * 0.2 || bot - top < H * 0.2) return null;
   var f = function (v, m) { return Math.max(0, Math.min(1, v / m)).toFixed(4); };
-  return (src.width / src.height).toFixed(4) + ';' + f(vx0, W) + ',' + f(top, H) + ',' + f(vx1, W) + ',' + f(H, H);
+  return (src.width / src.height).toFixed(4) + ';' + f(vx0, W) + ',' + f(top, H) + ',' + f(vx1, W) + ',' + f(bot, H);
 }
 
 /* PDF全体のページ画像をつくる */
