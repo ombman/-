@@ -14,7 +14,7 @@
   --radius:14px;
 }
 *{box-sizing:border-box}
-html,body{margin:0;padding:0}
+html,body{margin:0;padding:0;max-width:100%;overflow-x:hidden}
 body{
   font-family:var(--font);
   color:var(--ink); background:var(--bg);
@@ -66,8 +66,8 @@ header.site .wrap{display:flex;align-items:center;gap:12px;min-height:60px;flex-
 .count{color:var(--sub);font-size:13px}
 
 /* ===== 物件カード ===== */
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px;padding-bottom:28px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:18px;padding-bottom:28px}
+.card{min-width:0;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
   display:flex;flex-direction:column;transition:.15s}
 .card:hover{box-shadow:0 8px 24px rgba(28,36,48,.09);transform:translateY(-2px)}
 .card .top{padding:14px 16px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -76,6 +76,18 @@ header.site .wrap{display:flex;align-items:center;gap:12px;min-height:60px;flex-
 .tag.mansion{background:#e9f0f8;color:#25567f}
 .tag.unknown{background:#f0f0f0;color:#666}
 .tag.land{background:#f6efe2;color:#7a5a1f}
+}
+.card h3{margin:8px 16px 2px;font-size:16px;line-height:1.5}
+.price{margin:2px 16px 10px;font-size:25px;font-weight:700;color:var(--accent);letter-spacing:.01em}
+.price small{font-size:13px;font-weight:700;margin-left:2px}
+.price .na{font-size:15px;color:var(--sub)}
+.specs{list-style:none;margin:0;padding:0 16px 14px;border-top:1px solid var(--line);padding-top:12px}
+.specs li{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13.5px;border-bottom:1px dotted #eceff3}
+.specs li:last-child{border-bottom:0}
+.specs .k{color:var(--sub);flex:none}
+.specs .v{min-width:0;overflow-wrap:anywhere;word-break:break-word}
+.specs .v{font-weight:700;text-align:right}
+.specs .v.na{font-weight:400;color:#9aa6b4}
 /* ===== スマートフォン向け（幅600px以下） =====
    ・浮いているLINEボタンは物件の情報に重なるので出さない（上部・各物件・Wixの下部バーにLINEがある）
    ・上の案内欄を小さくし、物件をすぐ見られるようにする
@@ -93,17 +105,10 @@ header.site .wrap{display:flex;align-items:center;gap:12px;min-height:60px;flex-
   .card h3{font-size:15px;margin:6px 14px 0}
   .price{margin:0 14px 6px;font-size:22px}
   .card .top{padding:12px 14px 0}
+  .specs{padding:10px 14px 12px}
+  .specs li{font-size:13px;gap:8px}
+  .wrap{padding:0 12px}
 }
-.card h3{margin:8px 16px 2px;font-size:16px;line-height:1.5}
-.price{margin:2px 16px 10px;font-size:25px;font-weight:700;color:var(--accent);letter-spacing:.01em}
-.price small{font-size:13px;font-weight:700;margin-left:2px}
-.price .na{font-size:15px;color:var(--sub)}
-.specs{list-style:none;margin:0;padding:0 16px 14px;border-top:1px solid var(--line);padding-top:12px}
-.specs li{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:13.5px;border-bottom:1px dotted #eceff3}
-.specs li:last-child{border-bottom:0}
-.specs .k{color:var(--sub);flex:none}
-.specs .v{font-weight:700;text-align:right}
-.specs .v.na{font-weight:400;color:#9aa6b4}
 .card .foot{margin-top:auto;padding:0 16px 16px}
 .card .foot .btn-line{width:100%}
 .note{font-size:11.5px;color:var(--sub);padding:0 16px 12px;margin:0}
@@ -4069,7 +4074,7 @@ function cardHtml(p) {
     '<ul class="specs">' + specs + '</ul>' +
     /* Canvaのデザインに転記したマイソク。中の資料画像を押すと資料そのものを拡大する */
     '<div style="padding:0 16px 12px">' + maisokuHtml(p) +
-      '<p class="note" style="padding:6px 0 0;margin:0">クリックすると画面いっぱいに表示されます</p></div>' +
+      '<p class="note" style="padding:6px 0 0;margin:0">' + ((window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 'タップ' : 'クリック') + 'すると画面いっぱいに表示されます</p></div>' +
     (details.length ? '<details class="raw" style="margin:0 16px 12px">' +
       '<summary>物件概要を見る</summary>' +
       '<table class="detail"><tbody>' + details.map(function (d) {
