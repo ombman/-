@@ -1075,6 +1075,16 @@ function areaCandidates(t) {
   }
   return out;
 }
+/* ラベルの直後に書かれた面積だけを読む（無ければ null） */
+function pickAreaLabeled(t, kind) {
+  var s = zen2han(tighten(t));
+  var pat = kind === 'floor'
+    ? '(?:延べ?床面積|延面積|建物面積|床面積)'
+    : '(?:専有面積|占有面積|専有部分の?面積|専有部分)';
+  var m = s.match(new RegExp(pat + '[^0-9]{0,10}([0-9,]+(?:\\.[0-9]+)?)\\s*(?:\u33a1|m2|m\u00b2|\u5e73\u7c73)'));
+  var v = m ? num(m[1]) : null;
+  return v != null && v >= 10 && v <= 400 ? Math.round(v * 100) / 100 : null;
+}
 function pickArea(t, kind) {
   var s = zen2han(tighten(t));
   /* まずラベル直結の記載を探す */
@@ -1529,11 +1539,13 @@ function pickExtras(t, rec) {
   if (rec && rec.station) {
     var st = String(rec.station).replace(/駅$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     var lm = s.match(new RegExp('((?:JR|ＪＲ)?[^\\s「」『』●・、。:：/／()（）]{0,10}?線)[\\s　]*[「『]?[\\s　]*' + st));
-    if (lm) x.line = extraClean(lm[1].replace(/^.*?(?:交通|沿線|路線|最寄り?|利用)[:：]?/, '').replace(/^R(?=[^\s]*線)/, 'JR'), 16);
+    if (lm) x.line = extraClean(lm[1].replace(/^.*?(?:交通|沿線|路線|最寄り?|利用)[:：]?/, '').replace(/^[▶►▷■□◆◇●○・>＞]+/, '').replace(/^R(?=[^\s]*線)/, 'JR'), 16);
   }
-  var lay = s.match(/間\s*取り?[\s:：]*([1-9]?\s*S?L?D?K(?:\s*[+＋]\s*[0-9]?\s*(?:S|納戸|N|サービスルーム|WIC))?)/) ||
-            s.match(/(?:^|[^0-9A-Za-z])([1-9]\s*S?L?D?K(?:\s*[+＋]\s*[0-9]?\s*(?:S|納戸|N|サービスルーム))?)(?![A-Za-z])/);
-  if (lay && /K/.test(lay[1])) x.layout = lay[1].replace(/\s+/g, '').replace('＋', '+');
+  /* 「3LDK+2WIC」「2SLDK+SIC」「3LDK+S+WIC」のような付き部屋まで読む（長い記号から先に試す） */
+  var LAY_ADD = '(?:\\s*[+＋]\\s*[0-9]?\\s*(?:SIC|WIC|WTC|SC|TR|DEN|S|N|納戸|サービスルーム|ロフト))*';
+  var lay = s.match(new RegExp('間\\s*取り?[\\s:：]*([1-9]?\\s*S?L?D?K' + LAY_ADD + ')')) ||
+            s.match(new RegExp('(?:^|[^0-9A-Za-z])([1-9]\\s*S?L?D?K' + LAY_ADD + ')(?![A-Za-z])'));
+  if (lay && /K/.test(lay[1])) x.layout = lay[1].replace(/\s+/g, '').replace(/＋/g, '+');
   var stc = s.match(/(鉄骨鉄筋コンクリート|鉄筋コンクリート|軽量鉄骨|重量鉄骨|鉄骨|木造|SRC|RC|S造|W造)\s*(造)?/);
   if (stc) x.structure = stc[1] + (/造$/.test(stc[1]) ? '' : '造');
   var fl = s.match(/(?:地上\s*)?([0-9]{1,2})\s*階建/);
@@ -1709,7 +1721,17 @@ function extractAll(sections, extraWords, opts) {
     var res = extract(body, extraWords);
     /* 表組みの図面では記録順だと項目名と値が離れることがある。
        紙面順に並べ直した文字からも読み、取れなかった数値の項目だけを補う。 */
-    if (sections.alt && sections.alt[i]) fillMissing(res.record, extract(sections.alt[i], extraWords).record);
+    if (sections.alt && sections.alt[i]) {
+      fillMissing(res.record, extract(sections.alt[i], extraWords).record);
+      /* 面積は、紙面順の文字で「専有面積 73.05㎡」とラベルの直後に値があれば、そちらを正とする。
+         記録順の文字では「73.05㎡専有面積 11.34㎡バルコニー面積」のように値がラベルの前に来る資料があり、
+         隣のバルコニー面積を専有面積と読み違えていた */
+      [['ownArea', 'own'], ['floorArea', 'floor']].forEach(function (a) {
+        if (res.record[a[0]] == null) return;
+        var lv = pickAreaLabeled(sections.alt[i], a[1]);
+        if (lv != null) res.record[a[0]] = lv;
+      });
+    }
     /* それでも価格が無ければ、紙面上の位置で「万円」と結びついた数字を使う */
     if (res.record.priceMan == null && sections.geoPrice && sections.geoPrice[i] != null &&
         !RENTAL_RE.test(body)) {
@@ -2343,17 +2365,53 @@ function pickPriceByText(found, texts) {
   return cands[0].v;
 }
 
+/* 日本語の文字の対応表（CMap）の読み込み。
+   日本語資料の多くは、文字を番号で持つフォント（Adobe-Japan1）を使っており、
+   番号から文字に直す表（Adobe-Japan1-UCS2 など）をネットから読み込む必要がある。
+   読み込めないと、pdf.js はエラーにせず日本語を空のまま続けてしまい、
+   ・物件名・所在地などが読めず、転記欄が空になる
+   ・資料画像から日本語の文字が消える（数字だけ残る）
+   という結果になる。そこで、配信元を3か所用意して順に試し、
+   どこからも読めなければ、空のまま掲載せずに理由を表示する */
+var CMAP_BASES = [CONFIG.PDFJS_BASE,
+  'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/',
+  'https://unpkg.com/pdfjs-dist@3.11.174/'];
+var cmapCache = {}, cmapFailed = null;
+function MirrorCMapReader() {}
+MirrorCMapReader.prototype.fetch = function (q) {
+  var name = q && q.name;
+  if (!name) return Promise.reject(new Error('CMap name is not specified'));
+  if (!cmapCache[name]) {
+    cmapCache[name] = (function tryAt(k) {
+      if (k >= CMAP_BASES.length) return Promise.reject(new Error('CMap ' + name));
+      return fetch(CMAP_BASES[k] + 'cmaps/' + name + '.bcmap')
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+        .then(function (b) {
+          if (k > 0) { var ok = CMAP_BASES.splice(k, 1)[0]; CMAP_BASES.unshift(ok); }
+          return new Uint8Array(b);
+        }, function () { return tryAt(k + 1); });
+    })(0).catch(function (e) { delete cmapCache[name]; cmapFailed = name; throw e; });
+  }
+  return cmapCache[name].then(function (data) { return { cMapData: data, compressionType: 1 /* BINARY */ }; });
+};
+function pdfOpts(extra) {
+  return Object.assign({
+    cMapUrl: CONFIG.PDFJS_BASE + 'cmaps/', cMapPacked: true,
+    CMapReaderFactory: MirrorCMapReader,
+    standardFontDataUrl: CONFIG.PDFJS_BASE + 'standard_fonts/'
+  }, extra);
+}
+var CMAP_ERROR = '日本語の文字を読むための表（CMap）をネットから読み込めませんでした。' +
+  'このままでは物件名・所在地などが空になり、資料画像の日本語も消えるため、読み取りを中止しました。' +
+  'ネットの接続や、広告ブロッカー（AdBlock など）の設定を確認して、もう一度ドロップしてください。';
+
 function readPdfFile(file) {
   if (!window.pdfjsLib) return Promise.reject(new Error('PDF読取ライブラリを読み込めませんでした'));
+  cmapFailed = null;
   return file.arrayBuffer()
     .then(function (buf) {
-      return pdfjsLib.getDocument({
-        data: buf,
-        /* 日本語資料は Adobe-Japan1 等の CID フォントを使うため CMap の指定が必要 */
-        cMapUrl: CONFIG.PDFJS_BASE + 'cmaps/',
-        cMapPacked: true,
-        standardFontDataUrl: CONFIG.PDFJS_BASE + 'standard_fonts/'
-      }).promise;
+      /* 日本語資料は Adobe-Japan1 等の CID フォントを使うため CMap の指定が必要 */
+      return pdfjsLib.getDocument(pdfOpts({ data: buf })).promise;
     })
     .then(function (pdf) {
       var jobs = [];
@@ -2374,6 +2432,7 @@ function readPdfFile(file) {
       /* ページごとの配列として返す。記録順の文字を基本とし、
          紙面順に並べ直した文字は .alt に添える（取れなかった数値の補完に使う） */
       return Promise.all(jobs).then(function (pages) {
+        if (cmapFailed) throw new Error(CMAP_ERROR);
         var out = pages.map(function (p) { return p.stream; });
         out.alt = pages.map(function (p) { return p.layout; });
         out.geoPrice = pages.map(function (p) { return p.price; });
@@ -3032,6 +3091,8 @@ function renderRedactedPage(page, extraWords, scale, forceOcr, turn) {
          値をマイソクに転記するので、画像からは外す */
       var visualCrop = null;
       try { visualCrop = findVisualCrop(out); } catch (e) { visualCrop = null; }
+      /* 罫線の無い「物件概要」「DATA」の欄（文字だけの欄）が範囲に入っていれば、文字の位置から外す */
+      try { visualCrop = refineCropByText(out, items, visualCrop); } catch (e) {}
       return {
         visualCrop: visualCrop,
         dataUrl: enc.dataUrl,
@@ -3092,6 +3153,172 @@ function rowsText(items) {
     });
     return out;
   }).join('\n');
+}
+
+/* 転記する項目（物件概要）の見出しの語。この語で始まる・含む行がまとまっている所は
+   「物件概要」「DATA」の欄なので、マイソクの画像からは外す（値はマイソクに転記する） */
+var INFO_LINE = /所在地|所\s*在|交\s*通|構\s*造|階建|築年|専有面積|専\s*有\s*面\s*積|バルコニー面積|間取り?|管理費|修繕積立|土地権利|敷地権|用途地域|総戸数|分譲会社|施工会社|設計会社|管理会社|管理形態|駐輪場|駐車場|ペット|学\s*区|現\s*況|引\s*渡|取引態様|建[ぺペ]い率|容積率|地\s*目|接\s*道|土地面積|建物面積|延床面積|販売価格|価\s*格|[0-9,]+\s*万\s*円|物\s*件\s*概\s*要|D\s*A\s*T\s*A|物件番号|[0-9]+\s*号室|駅.{0,10}徒歩\s*[0-9]|^[\s　]*[1-9]\s*S?L?D?K/;
+
+/* 行の頭が「所在地／」「【所在地】」「◆構造：」のように見出しで始まる行（物件概要の表の行）。
+   アピール文の箇条書き（「■2011年3月建築」「■駅まで徒歩8分の立地」）はほとんど当てはまらない */
+var INFO_HEAD = /^[\s　]*[◆◇■□●○・▶▪【\[(（]?[\s　]*(?:所\s*在\s*地?|交\s*通|構\s*造|築\s*年\s*月?|専\s*有\s*面\s*積|バルコニー面積|間\s*取り?|管\s*理\s*費|修繕積立金|土地権利|敷地権|用途地域|総戸数|分譲会社|施工会社|設計会社|管理会社|管理形態|駐輪場|駐車場|ペット飼育|学\s*区|現\s*況|引\s*渡日?|取引態様|建[ぺペ]い率|容積率|地\s*目|接\s*道|土地面積|建物面積|延床面積|権\s*利)/;
+
+/* 文字データ（位置つき）から、転記する項目が4行以上かたまっている欄を探す。
+   戻り値は欄ごとの {x0,y0,x1,y1}（画像の画素） */
+function findInfoBlocks(items, pageH) {
+  /* 同じ行で近くにある断片を1行にまとめる（左右に並んだ別の欄とは分ける） */
+  var lines = [];
+  items.forEach(function (it) {
+    for (var k = lines.length - 1; k >= 0 && k >= lines.length - 30; k--) {
+      var L = lines[k];
+      var ov = Math.min(L.y1, it.cy) - Math.max(L.y0, it.y);
+      var mh = Math.min(L.y1 - L.y0, it.h);
+      if (ov >= mh * 0.5 && it.x - L.x1 < mh * 3 && L.x0 - (it.x + it.w) < mh * 3) {
+        L.parts.push(it); L.x0 = Math.min(L.x0, it.x); L.x1 = Math.max(L.x1, it.x + it.w);
+        L.y0 = Math.min(L.y0, it.y); L.y1 = Math.max(L.y1, it.cy); return;
+      }
+    }
+    lines.push({ parts: [it], x0: it.x, x1: it.x + it.w, y0: it.y, y1: it.cy });
+  });
+  /* 文字の並び順によっては同じ行が2つに分かれるので、重なる・隣り合う行をまとめ直す */
+  for (var again = true; again;) {
+    again = false;
+    for (var p1 = 0; p1 < lines.length && !again; p1++) for (var p2 = p1 + 1; p2 < lines.length && !again; p2++) {
+      var A = lines[p1], B = lines[p2], hh = Math.min(A.y1 - A.y0, B.y1 - B.y0);
+      var vo = Math.min(A.y1, B.y1) - Math.max(A.y0, B.y0);
+      var gap = Math.max(A.x0, B.x0) - Math.min(A.x1, B.x1);
+      if (vo >= hh * 0.5 && gap < hh * 3) {
+        A.parts = A.parts.concat(B.parts); A.x0 = Math.min(A.x0, B.x0); A.x1 = Math.max(A.x1, B.x1);
+        A.y0 = Math.min(A.y0, B.y0); A.y1 = Math.max(A.y1, B.y1); lines.splice(p2, 1); again = true;
+      }
+    }
+  }
+  lines.forEach(function (L) {
+    var ps = L.parts.slice().sort(function (a, b) { return a.x - b.x; });
+    L.str = ps.map(function (q) { return q.str; }).join('');
+    /* 項目の語が出てくる断片より左（隣のアピール文などがつながった部分）は欄に含めない */
+    var m = INFO_LINE.exec(L.str);
+    if (m) {
+      for (var pos = 0, pi = 0; pi < ps.length; pi++) {
+        pos += ps[pi].str.length;
+        if (pos > m.index) { L.ix0 = Math.max(L.x0, ps[pi].x); break; }
+      }
+    }
+  });
+  if (window.__RE_DEBUG) window.__infoLines = lines;
+  var info = lines.filter(function (L) { return INFO_LINE.test(L.str); });
+  info.sort(function (a, b) { return a.y0 - b.y0; });
+  var blocks = [];
+  info.forEach(function (L) {
+    var lh = L.y1 - L.y0;
+    var b = blocks.filter(function (b) {
+      /* 上下に近く、左右に重なる（左右に並ぶ欄は下でまとめる） */
+      return L.y0 - b.y1 <= Math.min(lh, b.lh) * 1.2 && Math.min(b.x1, L.x1) - Math.max(b.ox0, L.x0) > 0;
+    })[0];
+    var ix0 = L.ix0 != null ? L.ix0 : L.x0;
+    if (!b) { b = { x0: ix0, x1: L.x1, ox0: L.x0, y0: L.y0, y1: L.y1, n: 0, head: 0, lh: lh }; blocks.push(b); }
+    if (INFO_HEAD.test(L.str)) b.head++;
+    b.x0 = Math.min(b.x0, ix0); b.x1 = Math.max(b.x1, L.x1); b.ox0 = Math.min(b.ox0, L.x0);
+    b.y0 = Math.min(b.y0, L.y0); b.y1 = Math.max(b.y1, L.y1); b.n++; b.lh = Math.min(b.lh, lh);
+  });
+  /* ページ上部の見出し欄で、同じ高さに並ぶ欄（左の物件名と右の価格など）は1つにまとめる */
+  for (var merged = true; merged;) {
+    merged = false;
+    for (var i = 0; i < blocks.length && !merged; i++) for (var j = i + 1; j < blocks.length && !merged; j++) {
+      var a = blocks[i], c = blocks[j];
+      var ov = Math.min(a.y1, c.y1) - Math.max(a.y0, c.y0);
+      if (ov >= Math.max(a.y1 - a.y0, c.y1 - c.y0) * 0.5 && (!pageH || Math.max(a.y1, c.y1) <= pageH * 0.25)) {
+        a.x0 = Math.min(a.x0, c.x0); a.x1 = Math.max(a.x1, c.x1);
+        a.y0 = Math.min(a.y0, c.y0); a.y1 = Math.max(a.y1, c.y1); a.n += c.n; a.head += c.head;
+        blocks.splice(j, 1); merged = true;
+      }
+    }
+  }
+  /* 物件概要の欄＝見出しで始まる行が3行以上。ページ上部（上から25%まで）の見出し欄（物件名・価格・交通）は4行以上 */
+  return blocks.filter(function (b) { return b.n >= 4 && (b.head >= 3 || (pageH && b.y1 <= pageH * 0.25)); });
+}
+
+/* 範囲（visualCrop）に物件概要の欄が入っていれば、欄に重ならない最も広い長方形に変える。
+   長方形の辺が写真などを横切る（辺の上の半分以上が白くない）ものは選ばない */
+function refineCropByText(canvas, items, crop) {
+  if (!items || items.length < 8) return crop;
+  var W = canvas.width, H = canvas.height;
+  var blocks = findInfoBlocks(items, H).map(function (b) {
+    var m = 6;
+    return { x0: Math.max(0, b.x0 - m), y0: Math.max(0, b.y0 - m), x1: Math.min(W, b.x1 + m), y1: Math.min(H, b.y1 + m) };
+  }).filter(function (b) { return b.y0 < H; });
+  if (!blocks.length) return crop;
+  var cur = { x0: 0, y0: 0, x1: W, y1: H };
+  var cm = crop && /;([\d.]+),([\d.]+),([\d.]+),([\d.]+)/.exec(crop);
+  if (cm) cur = { x0: +cm[1] * W, y0: +cm[2] * H, x1: +cm[3] * W, y1: +cm[4] * H };
+  var area = function (r) { return Math.max(0, r.x1 - r.x0) * Math.max(0, r.y1 - r.y0); };
+  var inter = function (a, b) { return area({ x0: Math.max(a.x0, b.x0), y0: Math.max(a.y0, b.y0), x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1) }); };
+  /* 今の範囲に欄がほとんど（1割も）入っていなければ、そのまま */
+  if (!blocks.some(function (b) { return inter(b, cur) > area(b) * 0.1; })) return crop;
+  var sw = 400, sh = Math.round(H * sw / W), k = sw / W;
+  var sc = document.createElement('canvas'); sc.width = sw; sc.height = sh;
+  var sx = sc.getContext('2d', { willReadFrequently: true });
+  sx.fillStyle = '#fff'; sx.fillRect(0, 0, sw, sh); sx.drawImage(canvas, 0, 0, sw, sh);
+  var d = sx.getImageData(0, 0, sw, sh).data;
+  /* 紙の地の色（最も多い色）。写真や色の付いた欄は地の色と大きく違う */
+  var hist = {}, bgKey = null, bgN = 0;
+  for (var q = 0; q < d.length; q += 16) {
+    var key = (d[q] >> 4) + ',' + (d[q + 1] >> 4) + ',' + (d[q + 2] >> 4);
+    hist[key] = (hist[key] || 0) + 1;
+    if (hist[key] > bgN) { bgN = hist[key]; bgKey = key; }
+  }
+  var bg = bgKey.split(',').map(function (v) { return v * 16 + 8; });
+  var busy = function (x, y) {
+    x = Math.min(sw - 1, Math.max(0, Math.round(x * k))); y = Math.min(sh - 1, Math.max(0, Math.round(y * k)));
+    var i = (y * sw + x) * 4;
+    return Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2])) > 28;
+  };
+  var cuts = function (r) {
+    var n = 0, hit = 0, st = 3 / k;
+    /* 辺ごとに、辺の内側と外側（少し離れた所）がどちらも写真など（地の色でない）なら、そこは写真を横切っている */
+    var o = 6 / k;
+    [[r.x0, r.y0, r.x1, r.y0, 0, -1], [r.x0, r.y1, r.x1, r.y1, 0, 1], [r.x0, r.y0, r.x0, r.y1, -1, 0], [r.x1, r.y0, r.x1, r.y1, 1, 0]].forEach(function (e) {
+      /* 紙の端（画像の端）は横切りにならない */
+      /* 今の範囲の辺（罫線の表の端など、すでに決めた切り口）もそのまま使う */
+      if ((e[0] === e[2] && (e[0] <= 1 || e[0] >= W - 2 || e[0] === cur.x0 || e[0] === cur.x1)) ||
+          (e[1] === e[3] && (e[1] <= 1 || e[1] >= H - 2 || e[1] === cur.y0 || e[1] === cur.y1))) return;
+      var len = Math.max(Math.abs(e[2] - e[0]), Math.abs(e[3] - e[1])), c = 0, h = 0;
+      for (var t = 0; t <= len; t += st) {
+        var px = e[0] + (e[2] - e[0]) * t / len, py = e[1] + (e[3] - e[1]) * t / len;
+        c++; if (busy(px + e[4] * o, py + e[5] * o) && busy(px - e[4] * o, py - e[5] * o)) h++;
+      }
+      if (c && h / c > hit) hit = h / c;
+    });
+    return hit;
+  };
+  /* 今の範囲（罫線の表を外した範囲など）の中で探す */
+  /* 今の範囲の辺が写真を横切っている（罫線の表を見誤った）ときは、資料全体から探す */
+  var full = { x0: 0, y0: 0, x1: W, y1: H }, cur0 = cur;
+  cur = full;
+  /* 左右の辺だけを見る（上下の辺は見出しの帯などに沿うことが多い） */
+  if (cuts({ x0: cur0.x0, y0: 0, x1: cur0.x1, y1: H }) > 0.6) cur0 = full;
+  cur = cur0;
+  var xs = [cur.x0, cur.x1], ys = [cur.y0, cur.y1];
+  blocks.forEach(function (b) {
+    [b.x0, b.x1].forEach(function (v) { if (v > cur.x0 && v < cur.x1) xs.push(v); });
+    [b.y0, b.y1].forEach(function (v) { if (v > cur.y0 && v < cur.y1) ys.push(v); });
+  });
+  var best = null, bestA = 0;
+  xs.forEach(function (x0) { xs.forEach(function (x1) { if (x1 - x0 < W * 0.25) return;
+    ys.forEach(function (y0) { ys.forEach(function (y1) { if (y1 - y0 < H * 0.25) return;
+      var r = { x0: x0, y0: y0, x1: x1, y1: y1 };
+      if (blocks.some(function (b) { return inter(b, r) > 0; })) return;
+      var a = area(r);
+      if (a <= bestA) return;
+      var cu = cuts(r);
+      if (window.__RE_DEBUG) console.log('RECT', [r.x0 / W, r.y0 / H, r.x1 / W, r.y1 / H].map(function (v) { return v.toFixed(3); }).join(','), (a / W / H).toFixed(3), cu.toFixed(2));
+      if (cu > 0.5) return;
+      best = r; bestA = a;
+    }); }); }); });
+  if (!best || bestA < W * H * 0.2) return crop;
+  if (window.__RE_DEBUG) window.__textCropDbg = { blocks: blocks, best: best };
+  var f = function (v, m) { return Math.max(0, Math.min(1, v / m)).toFixed(4); };
+  return (W / H).toFixed(4) + ';' + f(best.x0, W) + ',' + f(best.y0, H) + ',' + f(best.x1, W) + ',' + f(best.y1, H);
 }
 
 /* 資料のうち、写真・間取り図・アピール文が載っている範囲を探す。
@@ -3370,8 +3597,8 @@ function renderRedactedPdf(file, extraWords, opts) {
   if (!window.pdfjsLib) return Promise.resolve([]);
   return file.arrayBuffer()
     .then(function (buf) {
-      var base = { cMapUrl: CONFIG.PDFJS_BASE + 'cmaps/', cMapPacked: true,
-                   standardFontDataUrl: CONFIG.PDFJS_BASE + 'standard_fonts/' };
+      cmapFailed = null;
+      var base = pdfOpts({});
       /* 同じ資料を2通りに開く。
          ・paths：埋め込みのフォントをブラウザに読み込ませず、文字の形を図形として直接描く。
            ブラウザによっては埋め込みの日本語フォント（ヒラギノ・小塚ゴシックなど）を
@@ -3397,11 +3624,13 @@ function renderRedactedPdf(file, extraWords, opts) {
       var runs = [];
       for (var li = 0; li < lanes; li++) runs.push(next());
       return Promise.all(runs).then(function () {
+        /* 日本語の対応表を読み込めなかったときは、日本語の消えた資料画像を掲載しない */
+        if (cmapFailed) throw new Error(CMAP_ERROR);
         out.sort(function (a, b) { return a.pageNo - b.pageNo; });
         return out;
       });
       function next() {
-        if (i > pdf.numPages) return Promise.resolve(out);
+        if (i > pdf.numPages || cmapFailed) return Promise.resolve(out);
         if (opts && opts.stop && opts.stop()) return Promise.resolve(out);
         var n = i++;
         /* 前回の途中から再開するときは、終わっていないページだけを処理する */
@@ -3430,7 +3659,7 @@ function renderRedactedPdf(file, extraWords, opts) {
           })
           .then(function (img) {
             img.pageNo = n; out.push(img);
-            if (onPage) { try { onPage(img, n, pdf.numPages); } catch (e) {} }
+            if (onPage && !cmapFailed) { try { onPage(img, n, pdf.numPages); } catch (e) {} }
             return next();
           })
           .catch(function () { return next(); });   /* 1ページ失敗しても続ける */
@@ -5299,7 +5528,7 @@ window.__RE = {
   mergeOcrResult: mergeOcrResult, voteOcrPrice: voteOcrPrice, pickNameOcr: pickNameOcr, Ocr: Ocr,
   pickPriceByText: pickPriceByText, tightenText: tightenText, pickAddressOcr: pickAddressOcr, Store: Store,
   pickWalkDict: pickWalkDict, matchStation: matchStation, removeRules: removeRules, pickStationDict: pickStationDict,
-  maisokuHtml: maisokuHtml, fitMaisoku: fitMaisoku, findVisualCrop: findVisualCrop, rowsText: rowsText, mkValues: mkValues, pickExtras: pickExtras, pickLandArea: pickLandArea,
+  maisokuHtml: maisokuHtml, fitMaisoku: fitMaisoku, findVisualCrop: findVisualCrop, findInfoBlocks: findInfoBlocks, refineCropByText: refineCropByText, rowsText: rowsText, mkValues: mkValues, pickExtras: pickExtras, pickLandArea: pickLandArea,
   readByLabels: readByLabels, cropForRead: cropForRead, unslant: unslant, fontsLoaded: fontsLoaded, allFontsEmbedded: allFontsEmbedded,
   /* 検証用：確認待ちの物件の状態（掲載できない理由・保存する大きさ） */
   __drafts: function () {

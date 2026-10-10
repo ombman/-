@@ -267,6 +267,44 @@ const vc = await p.evaluate(() => {
   ok('上の見出し欄（価格・物件名）も外す', m && Number(m[2]) > 0.09 && Number(m[2]) < 0.15, vc.crop);
   ok('表が無い資料は全体を使う', vc.none === null, String(vc.none)); }
 
+/* 転記の精度：付き部屋のある間取り・路線の記号・値がラベルの前に来る面積 */
+console.log('\n-- 転記の精度');
+const acc = await p.evaluate(() => {
+  const R = window.__RE;
+  const e1 = R.pickExtras('ダイアパレス甲子園 403号室  3LDK＋2WIC\n▶阪神本線『久寿川駅』まで…徒歩5分', { station: '久寿川駅' });
+  const e2 = R.pickExtras('間取り\n2SLDK+SIC\n専有面積（壁芯）76.54㎡', {});
+  const flow = '73.05㎡専 有 面 積 11.34㎡バルコニー面積\n販売価格 4,290万円\nダイアパレス甲子園 403号室\n区分マンション 3LDK 築年月／2000年9月 阪神本線「久寿川」駅 徒歩5分';
+  const alt = '販売価格 4,290万円\nダイアパレス甲子園 403号室\n専 有 面 積 73.05㎡  バルコニー面積 11.34㎡\n区分マンション 3LDK 築年月／2000年9月 阪神本線「久寿川」駅 徒歩5分';
+  const secs = [flow]; secs.alt = [alt];
+  const r = R.extractAll(secs, [], { keepEmpty: true })[0].record;
+  return { l1: e1.layout, line: e1.line, l2: e2.layout, own: r.ownArea };
+});
+ok('「3LDK＋2WIC」を付き部屋まで読む', acc.l1 === '3LDK+2WIC', acc.l1);
+ok('「2SLDK+SIC」を付き部屋まで読む', acc.l2 === '2SLDK+SIC', acc.l2);
+ok('路線の前の「▶」は付けない', acc.line === '阪神本線', acc.line);
+ok('値がラベルの前に来る資料でも、専有面積にバルコニー面積を入れない', acc.own === 73.05, String(acc.own));
+
+/* 罫線の無い「物件概要」の欄（左に文字だけが並ぶ様式）を、文字の位置から外す */
+const tb = await p.evaluate(() => {
+  const W = 1200, H = 850;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d'); x.fillStyle = '#f2f0ee'; x.fillRect(0, 0, W, H);
+  x.fillStyle = '#7a9'; x.fillRect(620, 160, 560, 330);                           /* 写真 */
+  x.fillStyle = '#fff'; x.fillRect(360, 160, 240, 600);                           /* 間取り図 */
+  const items = []; const it = (str, ix, iy, w, h) => items.push({ str, x: ix, y: iy - h, w, h, cy: iy });
+  it('物件番号 4250759', 40, 50, 200, 18); it('ダイアパレス甲子園 403号室', 40, 100, 400, 40);
+  it('3LDK＋2WIC', 760, 100, 160, 30); it('販売価格', 940, 60, 100, 16); it('4,290万円', 940, 120, 220, 60);
+  ['◆所在地／兵庫県西宮市甲子園洲鳥町1-12', '◆構造・階数／鉄骨鉄筋コンクリート造9階建', '◆築年月／2000年9月', '◆現況／空室',
+   '◆引渡日／相談', '◆用途地域／第1種住居地域', '◆総戸数／42戸', '◆管理費／月額8,705円', '◆修繕積立金／月額17,200円', '◆管理会社／株式会社サンプル']
+    .forEach((s, i) => it(s, 40, 200 + i * 26, 280, 16));
+  it('◆オートロック', 40, 560, 100, 16); it('◆エレベータ', 40, 586, 100, 16);           /* 設備（転記しない） */
+  return { crop: window.__RE.refineCropByText(c, items, null) };
+});
+{ const m = String(tb.crop).match(/;([0-9.]+),([0-9.]+),([0-9.]+),([0-9.]+)/);
+  ok('左の物件概要（文字だけの欄）を画像から外す', m && Number(m[1]) > 310 / 1200 && Number(m[1]) < 360 / 1200, String(tb.crop));
+  ok('上の物件名・価格の見出しも外す', m && Number(m[2]) > 120 / 850 && Number(m[2]) < 160 / 850, String(tb.crop));
+  ok('写真・間取り図は残す', m && Number(m[3]) === 1 && Number(m[4]) === 1, String(tb.crop)); }
+
 /* 横罫線の無い物件概要（右に細かい文字だけが並び、縦線1本で区切られている様式） */
 const vs = await p.evaluate(() => {
   const c = document.createElement('canvas'); c.width = 1200; c.height = 850;
