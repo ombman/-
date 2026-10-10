@@ -267,6 +267,26 @@ const vc = await p.evaluate(() => {
   ok('上の見出し欄（価格・物件名）も外す', m && Number(m[2]) > 0.09 && Number(m[2]) < 0.15, vc.crop);
   ok('表が無い資料は全体を使う', vc.none === null, String(vc.none)); }
 
+/* 横罫線の無い物件概要（右に細かい文字だけが並び、縦線1本で区切られている様式） */
+const vs = await p.evaluate(() => {
+  const c = document.createElement('canvas'); c.width = 1200; c.height = 850;
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 1200, 850);
+  x.fillStyle = '#a01'; x.fillRect(0, 20, 1200, 14);                             /* 上の色帯 */
+  x.fillStyle = '#000'; x.fillRect(150, 110, 700, 2);                             /* 物件名の下線 */
+  x.fillStyle = '#a01'; x.fillRect(40, 150, 820, 50);                             /* アピール文の帯 */
+  x.fillStyle = '#fff'; x.fillRect(200, 168, 400, 14);                            /* 帯の白抜き文字 */
+  x.fillStyle = '#7a9'; x.fillRect(40, 230, 420, 300);                            /* 写真 */
+  x.fillStyle = '#000'; x.strokeStyle = '#000'; x.lineWidth = 3;
+  x.strokeRect(560, 230, 280, 520); x.fillRect(560, 480, 280, 3);                 /* 間取り図（壁は横の線とつながる） */
+  x.fillRect(870, 50, 3, 790);                                                    /* 区切りの縦線 */
+  for (let i = 0; i < 32; i++) for (let k = 0; k < 12 + (i % 3) * 3; k++) x.fillRect(890 + k * 16, 60 + i * 24, 5, 5); /* 右の文字だけの物件概要（1文字ずつ） */
+  return window.__RE.findVisualCrop(c);
+});
+{ const m = String(vs).match(/;([0-9.]+),([0-9.]+),([0-9.]+),([0-9.]+)/);
+  ok('縦線で区切られた物件概要（横罫線なし）を外す', m && Number(m[1]) === 0 && Math.abs(Number(m[3]) - 870 / 1200) < 0.02, String(vs));
+  ok('間取り図の壁では切らない', m && Number(m[3]) > 845 / 1200, String(vs));
+  ok('アピール文の帯は残し、物件名の見出しは外す', m && Number(m[2]) > 115 / 850 && Number(m[2]) < 152 / 850, String(vs)); }
+
 /* スキャン資料で行頭の「●」が「@」と読まれた物件概要の細かい文字を、業者欄と取り違えない */
 console.log('\n-- 「●」が「@」に化けた物件概要を業者欄にしない');
 const atBullet = await p.evaluate(() => window.__RE.findBandTop([

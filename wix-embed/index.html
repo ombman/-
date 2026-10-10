@@ -3136,7 +3136,7 @@ function findVisualCrop(src) {
   };
   var right = group(runs.filter(function (r) { return r.x0 > W * 0.35 && r.x1 > W * 0.8; }), 'x1');
   var left = group(runs.filter(function (r) { return r.x0 < W * 0.2 && r.x1 < W * 0.65 && r.x1 > W * 0.2; }), 'x0');
-  var vx0, vx1;
+  var vx0, vx1, sepMode = false;
   /* 表の端＝表の横罫線が最も多く始まる位置。間取り図の壁が表の罫線とつながって
      少数の長い線になることがあるが、表の罫線の本数にはかなわない */
   var mode = function (gs, key) {
@@ -3175,7 +3175,36 @@ function findVisualCrop(src) {
   } else if (left.length && mode(left, 'x1') != null) {
     vx0 = mode(left, 'x1') + 3;
     vx1 = W - 1;
-  } else return null;
+  } else {
+    /* 横罫線のない物件概要（右側に文字だけが並び、縦線1本で区切られている様式）。
+       右寄り（55〜85%）にあるページの縦6割以上の長い縦線で、横から線がつながっておらず
+       （間取り図の壁ではない）、その右側が写真のない文字だけの欄なら、その線の左側を範囲とする */
+    var lum = function (x, y) { var k = (y * W + x) * 4; return 0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2]; };
+    var sep = null;
+    /* 縦線の区切り：見出しの間などで途切れることがあるので、濃い行の数（ページの縦7割以上）で見る */
+    var cov = function (x) {
+      var n = 0, a = -1, b = -1;
+      for (var yy = 0; yy < H; yy++) if (Math.min(lum(x, yy), lum(x + 1, yy)) < 215) { n++; if (a < 0) a = yy; b = yy; }
+      return { n: n, a: a, b: b };
+    };
+    for (var sx = Math.round(W * 0.55); sx <= Math.round(W * 0.85) && sep == null; sx++) {
+      var cv = cov(sx);
+      if (cv.n < H * 0.7) continue;
+      /* 細い線であること（写真の端のように左右も濃いものは線ではない） */
+      if (cov(sx - 3).n >= H * 0.4 || cov(sx + 4).n >= H * 0.4) continue;
+      var joinsN = 0, ink = 0, tot = 0;
+      for (var yj = cv.a; yj <= cv.b; yj++) {
+        var hl = 0, hr = 0;
+        for (var t = 3; t <= 10; t++) { if (lum(sx - t, yj) < 200) hl++; if (sx + 1 + t < W && lum(sx + 1 + t, yj) < 200) hr++; }
+        if (hl >= 7 || hr >= 7) joinsN++;
+        for (var xr = sx + 4; xr < W; xr += 2) { tot++; if (lum(xr, yj) < 200) ink++; }
+      }
+      if (window.__RE_DEBUG) console.log('SEP', sx, cv.n, joinsN, tot ? (ink / tot).toFixed(3) : '-');
+      if (joinsN <= cv.n * 0.04 && tot && ink / tot < 0.12) sep = sx;
+    }
+    if (sep == null) return null;
+    vx0 = 0; vx1 = sep - 3; sepMode = true;
+  }
   if (vx1 - vx0 < W * 0.3) return null;
   /* 上端：範囲の幅の8割以上にわたる罫線のうち、上から30%までにある最も下のもの */
   var top = 0;
@@ -3183,6 +3212,22 @@ function findVisualCrop(src) {
     var cover = Math.min(r.x1, vx1) - Math.max(r.x0, vx0);
     if (r.y < H * 0.3 && cover >= (vx1 - vx0) * 0.8 && r.y + 2 > top) top = r.y + 2;
   });
+  /* 縦線区切りの様式では、物件名・価格の見出しの下に、帯（太い色の欄）でアピール文が書かれていることがある。
+     いちばん下の幅いっぱいの線が太い帯なら、帯の上で切って、アピール文は残す */
+  if (sepMode) {
+    var ys = [];
+    runs.forEach(function (r) {
+      var cover = Math.min(r.x1, vx1) - Math.max(r.x0, vx0);
+      if (r.y < H * 0.3 && cover >= (vx1 - vx0) * 0.8 && ys.indexOf(r.y) < 0) ys.push(r.y);
+    });
+    ys.sort(function (a, b) { return a - b; });
+    if (ys.length) {
+      var bEnd = ys[ys.length - 1], bStart = bEnd;
+      /* 帯の中の白抜き文字の行では線が途切れるので、10行までの切れ目は同じ帯とみなす */
+      for (var q = ys.length - 2; q >= 0 && ys[q] >= bStart - 10; q--) bStart = ys[q];
+      if (bEnd - bStart + 1 >= 6) top = Math.max(0, bStart - 2);
+    }
+  }
   /* 範囲を囲む枠線（資料の外枠・欄の罫線）は載せない。端から内側へ少しの幅だけ見て、
      細い線（すぐ内側は白い）が範囲の大部分にわたって引かれていれば、その内側で切る。
      写真の端のように内側も濃いものは線ではないので切らない */
