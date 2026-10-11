@@ -67,6 +67,57 @@ def _show_info_dialog(title: str, message: str) -> None:
         print(f"\n[{title}] {message}\n")
 
 
+def _ask_yes_no(title: str, message: str) -> bool:
+    """はい／いいえ を聞きます（画面が出せないときは「いいえ」扱い）。"""
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        answer = messagebox.askyesno(title, message, parent=root)
+        root.destroy()
+        return bool(answer)
+    except Exception:
+        print(f"\n[{title}] {message}\n")
+        return False
+
+
+def _close_leftover_chrome() -> bool:
+    """
+    前回の実行で開いたChrome（このアプリ専用）が開いたままなら、閉じてよいか聞いて閉じます。
+    Chromeは同じプロファイルで2つ同時に起動できず、開いたままだと起動直後に止まるため。
+    続行してよければ True。
+    """
+    import browser
+
+    log = get_logger()
+    procs = browser.find_profile_chrome()
+    if not procs:   # 無い（または調べられない）→ そのまま起動する
+        return True
+    log.warning("前回のアプリのChromeが開いたままです（%d プロセス）。", len(procs))
+    if not _ask_yes_no(
+        "前回のChromeが開いたままです",
+        "前回の実行で開いたChrome（REINS・掲載サイトの画面）がまだ開いています。\n"
+        "このアプリのChromeは2つ同時には開けないため、このままでは実行できません。\n\n"
+        "前回のChromeを閉じて、新しく実行しますか？\n\n"
+        "※掲載サイトで入力の途中だった場合は「いいえ」を押し、\n"
+        "　作業を終えてChromeを閉じてから、もう一度実行してください。",
+    ):
+        log.info("前回のChromeを閉じずに終了します。")
+        return False
+    if not browser.close_profile_chrome(procs):
+        _show_error_dialog(
+            "Chromeを閉じられませんでした",
+            "前回のChromeを自動で閉じられませんでした。\n"
+            "画面右上の × でChromeを閉じてから、もう一度実行してください。",
+        )
+        return False
+    log.info("前回のChromeを閉じました。")
+    return True
+
+
 def _wait_until_browser_closed(page) -> None:
     """人がChromeを閉じるまで待ちます（掲載サイトの読み取り処理をブラウザ内で続けるため）。"""
     log = get_logger()
@@ -233,6 +284,10 @@ def main(argv: list[str]) -> int:
         _show_error_dialog("設定エラー", str(exc))
         return 1
 
+    # 前回のChromeが開いたままだと起動できないので、先に片付ける
+    if not _close_leftover_chrome():
+        return 6
+
     try:
         with BrowserSession(settings) as page:
             # --- ログイン ---
@@ -265,6 +320,15 @@ def main(argv: list[str]) -> int:
 
     except Exception as exc:  # 想定外のエラー
         log.error("想定外のエラーが発生しました: %s\n%s", exc, traceback.format_exc())
+        if "launch_persistent_context" in str(exc):
+            _show_error_dialog(
+                "Chromeを起動できませんでした",
+                "Chromeを起動できませんでした。\n"
+                "開いているChrome（このアプリが開いたもの）を閉じてから、もう一度実行してください。\n"
+                "直らない場合は、パソコンを再起動してから実行してください。\n\n"
+                f"詳細: {str(exc).splitlines()[0]}",
+            )
+            return 98
         _show_error_dialog("エラー", f"想定外のエラーが発生しました。\n{exc}")
         return 99
 

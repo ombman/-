@@ -14,6 +14,9 @@ Google Chrome を Playwright 経由で起動・終了するモジュールです
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -54,10 +57,98 @@ def _allow_multiple_downloads(log) -> None:
         auto = exc.setdefault("automatic_downloads", {})
         for pat in ("https://system.reins.jp:443,*", "https://reins.jp:443,*", "[*.]reins.jp,*"):
             auto[pat] = {"setting": 1}
+        # 前回のChromeを途中で閉じた場合でも「ページを復元しますか？」を出さない
+        profile["exit_type"] = "Normal"
+        profile["exited_cleanly"] = True
         pref_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         log.debug("複数ダウンロード許可の設定を適用しました。")
     except Exception as exc:
         log.debug("複数ダウンロード許可の設定に失敗（続行）: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# 前回のChromeが開いたままのときの対処
+#   Chromeは同じプロファイル（.chrome-profile）で2つ同時に起動できない。
+#   開いたままだと新しいChromeは「既存のブラウザ セッションで開いています」と言って
+#   すぐ終了し、アプリは起動直後に止まってしまう。
+#   そこで、このアプリ専用プロファイルで動いているChromeを探し、閉じられるようにする。
+#   ※ふだん使いのChromeは別のプロファイルなので対象外。
+# ---------------------------------------------------------------------------
+def _load_psutil():
+    """プロセスを調べる部品（psutil）。update では部品が増えないため、無ければその場で追加する。"""
+    try:
+        import psutil
+        return psutil
+    except ImportError:
+        pass
+    log = get_logger()
+    log.info("部品（psutil）を追加します（初回のみ・数秒）…")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "psutil"],
+            check=True, timeout=300, capture_output=True,
+        )
+        import importlib
+        importlib.invalidate_caches()
+        import psutil
+        return psutil
+    except Exception as exc:
+        log.warning("部品（psutil）を追加できませんでした: %s", exc)
+        return None
+
+
+def find_profile_chrome():
+    """
+    このアプリ専用プロファイルで動いているChromeのプロセス一覧を返す。
+    調べられなかったときは None を返す。
+    """
+    psutil = _load_psutil()
+    if psutil is None:
+        return None
+    target = os.path.normcase(os.path.abspath(str(USER_DATA_DIR)))
+    found = []
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            args = proc.info.get("cmdline") or []
+        except Exception:
+            continue
+        for arg in args:
+            if isinstance(arg, str) and arg.startswith("--user-data-dir="):
+                value = arg.split("=", 1)[1].strip().strip('"')
+                if value and os.path.normcase(os.path.abspath(value)) == target:
+                    found.append(proc)
+                break
+    return found
+
+
+def close_profile_chrome(procs, timeout: float = 15) -> bool:
+    """find_profile_chrome() で見つけたChromeを閉じる。全部閉じられたら True。"""
+    psutil = _load_psutil()
+    if psutil is None:
+        return False
+    for proc in procs:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        psutil.wait_procs(procs, timeout=timeout)
+    except Exception:
+        pass
+    # 子プロセスの後始末を待ち、残っていないか確かめる
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        left = find_profile_chrome()
+        if not left:
+            time.sleep(0.5)
+            return True
+        for proc in left:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        time.sleep(0.5)
+    return not find_profile_chrome()
 
 
 # いま使っているブラウザセッション（掲載サイトへ渡す前にChromeが閉じていたとき、起動し直すため）
@@ -83,7 +174,6 @@ class BrowserSession:
         log = get_logger()
         USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        _allow_multiple_downloads(log)
 
         self._pw = sync_playwright().start()
         global CURRENT
@@ -97,10 +187,12 @@ class BrowserSession:
                 self._context.close()
         except Exception:
             pass
-        return self._launch()
+        # 自分が開いたChromeが閉じきっていなければ閉じてから起動する
+        return self._launch(close_leftover=True)
 
-    def _launch(self):
+    def _launch(self, close_leftover: bool = False):
         log = get_logger()
+        _allow_multiple_downloads(log)
         channel = self.settings.get("browser_channel", "chrome")
         headless = bool(self.settings.get("headless", False))
         slow_mo = int(self.settings.get("slow_mo_ms", 300))
@@ -111,7 +203,7 @@ class BrowserSession:
             user_data_dir=str(USER_DATA_DIR),
             headless=headless,
             slow_mo=slow_mo,
-            args=["--start-maximized"],
+            args=["--start-maximized", "--hide-crash-restore-bubble"],
             no_viewport=True,          # ウィンドウサイズに追従
             accept_downloads=True,      # ダウンロードを検出できるようにする（保存はurllibで実施）
         )
@@ -119,17 +211,26 @@ class BrowserSession:
         #   記号名(GUID)の壊れファイルとして downloads に残すため。実体の保存は
         #   reins_search の _click_download が Cookie付きurllibで確実に行う。
 
+        def start():
+            try:
+                return self._pw.chromium.launch_persistent_context(channel=channel, **launch_kwargs)
+            except Exception as exc:
+                # Google Chrome が見つからない等の場合は Playwright 同梱の Chromium で代替
+                log.warning(
+                    "channel=%s での起動に失敗したため、Playwright同梱のChromiumで再試行します: %s",
+                    channel, str(exc).splitlines()[0],
+                )
+                return self._pw.chromium.launch_persistent_context(**launch_kwargs)
+
         try:
-            self._context = self._pw.chromium.launch_persistent_context(
-                channel=channel, **launch_kwargs
-            )
-        except Exception as exc:
-            # Google Chrome が見つからない等の場合は Playwright 同梱の Chromium で代替
-            log.warning(
-                "channel=%s での起動に失敗したため、Playwright同梱のChromiumで再試行します: %s",
-                channel, exc,
-            )
-            self._context = self._pw.chromium.launch_persistent_context(**launch_kwargs)
+            self._context = start()
+        except Exception:
+            leftover = find_profile_chrome() if close_leftover else None
+            if not leftover:
+                raise
+            log.warning("このアプリ用のChromeが残っていたため閉じて起動し直します（%d プロセス）。", len(leftover))
+            close_profile_chrome(leftover)
+            self._context = start()
 
         self._context.set_default_timeout(int(self.settings.get("default_timeout_ms", 15000)))
 
