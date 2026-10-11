@@ -141,6 +141,23 @@ def _open_site(context, site_url: str, timeout_ms: int):
         ) from exc
 
 
+def _discard_leftovers(page, frame) -> None:
+    """
+    前回までに掲載されずに残った読み取り結果（ログインすると自動で戻る）を破棄する。
+    残したままだと、今回の資料と同じ物件が二重・三重に並び、「すべて掲載」で重複や失敗が増えるため。
+    """
+    log = get_logger()
+    page.wait_for_timeout(2000)   # 前回分の復元が画面に出るのを待つ
+    bar = frame.locator("#bulkBar")
+    if not bar.is_visible():
+        return
+    count = (frame.locator("#bulkCount").text_content() or "?").strip()
+    log.info("前回までに残っていた読み取り結果 %s 件を破棄します（今回の資料と重複させないため）。", count)
+    page.once("dialog", lambda d: d.accept())   # 「すべて破棄しますか？」に OK
+    frame.locator("#btnDiscardAll").click(timeout=30000)
+    bar.wait_for(state="hidden", timeout=30000)
+
+
 def upload_to_wix(context, site_url: str, password: str, files: list[Path], timeout_ms: int = 60000):
     """
     files を掲載サイトのドロップ枠へ渡します。成功したらそのタブ（Page）を返します。
@@ -161,6 +178,7 @@ def upload_to_wix(context, site_url: str, password: str, files: list[Path], time
         frame = find_widget_frame(page, timeout_ms)
         _login(frame, password, timeout_ms)
 
+        _discard_leftovers(page, frame)
         log.info("ドラッグ＆ドロップ枠に資料を渡します（%d件）: %s", len(files), ", ".join(f.name for f in files))
         dz = frame.locator("#dz")
         dz.scroll_into_view_if_needed(timeout=timeout_ms)
