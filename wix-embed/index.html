@@ -3092,7 +3092,20 @@ function renderRedactedPage(page, extraWords, scale, forceOcr, turn) {
       var visualCrop = null;
       try { visualCrop = findVisualCrop(out); } catch (e) { visualCrop = null; }
       /* 罫線の無い「物件概要」「DATA」の欄（文字だけの欄）が範囲に入っていれば、文字の位置から外す */
-      try { visualCrop = refineCropByText(out, items, visualCrop); } catch (e) {}
+      /* スキャン資料は文字データが無いので、文字認識で読んだ行（位置つき）を使う */
+      var posItems = items.length >= 8 ? items : [];
+      if (!posItems.length) {
+        /* 1行にまとめて読んだ行は、写真の中の読み違いとつながって横に長くなることがあるので、
+           散らばった文字を拾う読み方の行（小さなまとまり）を使う。無ければまとめて読んだ行 */
+        (extraBandLines || []).forEach(function (l) {
+          if (l && l.text) posItems.push({ str: l.text, x: l.x, y: l.y, w: l.w, h: l.h, cy: l.y + l.h });
+        });
+        if (posItems.length < 8) {
+          posItems = [];
+          lines.forEach(function (ln) { if (ln.ocr) ln.parts.forEach(function (q) { posItems.push(q); }); });
+        }
+      }
+      try { visualCrop = refineCropByText(out, posItems, visualCrop); } catch (e) {}
       return {
         visualCrop: visualCrop,
         dataUrl: enc.dataUrl,
@@ -3157,11 +3170,18 @@ function rowsText(items) {
 
 /* 転記する項目（物件概要）の見出しの語。この語で始まる・含む行がまとまっている所は
    「物件概要」「DATA」の欄なので、マイソクの画像からは外す（値はマイソクに転記する） */
-var INFO_LINE = /所在地|所\s*在|交\s*通|構\s*造|階建|築年|専有面積|専\s*有\s*面\s*積|バルコニー面積|間取り?|管理費|修繕積立|土地権利|敷地権|用途地域|総戸数|分譲会社|施工会社|設計会社|管理会社|管理形態|駐輪場|駐車場|ペット|学\s*区|現\s*況|引\s*渡|取引態様|建[ぺペ]い率|容積率|地\s*目|接\s*道|土地面積|建物面積|延床面積|販売価格|価\s*格|[0-9,]+\s*万\s*円|物\s*件\s*概\s*要|D\s*A\s*T\s*A|物件番号|[0-9]+\s*号室|駅.{0,10}徒歩\s*[0-9]|^[\s　]*[1-9]\s*S?L?D?K/;
+var INFO_LINE = /所在地|権利|敷地面積|所在階|所\s*在|交\s*通|構\s*造|階建|築年|専有面積|専\s*有\s*面\s*積|バルコニー面積|間取り?|管理費|修繕積立|土地権利|敷地権|用途地域|総戸数|分譲会社|施工会社|設計会社|管理会社|管理形態|駐輪場|駐車場|ペット|学\s*区|現\s*況|引\s*渡|取引態様|建[ぺペ]い率|容積率|地\s*目|接\s*道|土地面積|建物面積|延床面積|販売価格|価\s*格|[0-9,]+\s*万\s*円|物\s*件\s*概\s*要|D\s*A\s*T\s*A|物件番号|[0-9]+\s*号室|駅.{0,10}徒歩\s*[0-9]|^[\s　]*[1-9]\s*S?L?D?K/;
 
 /* 行の頭が「所在地／」「【所在地】」「◆構造：」のように見出しで始まる行（物件概要の表の行）。
    アピール文の箇条書き（「■2011年3月建築」「■駅まで徒歩8分の立地」）はほとんど当てはまらない */
-var INFO_HEAD = /^[\s　]*[◆◇■□●○・▶▪【\[(（]?[\s　]*(?:所\s*在\s*地?|交\s*通|構\s*造|築\s*年\s*月?|専\s*有\s*面\s*積|バルコニー面積|間\s*取り?|管\s*理\s*費|修繕積立金|土地権利|敷地権|用途地域|総戸数|分譲会社|施工会社|設計会社|管理会社|管理形態|駐輪場|駐車場|ペット飼育|学\s*区|現\s*況|引\s*渡日?|取引態様|建[ぺペ]い率|容積率|地\s*目|接\s*道|土地面積|建物面積|延床面積|権\s*利)/;
+var INFO_HEAD = /^[\s　]*[◆◇■□●○・▶▪@＠【\[(（]?[\s　]*(?:所\s*在\s*地?|交\s*通|構\s*造|築\s*年\s*月?|専\s*有\s*面\s*積|バルコニー面積|間\s*取り?|管\s*理\s*費|修繕積立金|土地権利|敷地権|用途地域|総戸数|分譲会社|施工会社|設計会社|管理会社|管理形態|駐輪場|駐車場|ペット飼育|学\s*区|現\s*況|引\s*渡日?|取引態様|建[ぺペ]い率|容積率|地\s*目|接\s*道|土地面積|建物面積|延床面積|権\s*利)/;
+
+/* 1行に「所在地：…　交通：…　築年月：…」のように見出しと値の組が2つ以上並ぶ行（細かい字の物件概要） */
+var INFO_PAIR = /(?:所在地|交通|構造|築年月|専有面積|バルコニー面積|その他面積|間取り?|管理費|修繕積立金|修繕積立費|土地権利|用途地域|総戸数|分譲会社|施工会社|管理会社|管理組合|管理形態|管理人|管理人状況|駐車場|駐輪場|現況|引渡|ペット|ガス|給湯|固定資産税|町会費|土地面積|建物面積|延床面積|建[ぺペ]い率|容積率|地目|接道|権利|持分割合|学区)[:：／/]/g;
+/* アピール文の「■専有面積：65.17㎡ ■間取り：3LDK」（2組）と区別するため、3組以上 */
+function infoHead(str) {
+  return INFO_HEAD.test(str) || (String(str).match(INFO_PAIR) || []).length >= 3;
+}
 
 /* 文字データ（位置つき）から、転記する項目が4行以上かたまっている欄を探す。
    戻り値は欄ごとの {x0,y0,x1,y1}（画像の画素） */
@@ -3195,12 +3215,14 @@ function findInfoBlocks(items, pageH) {
   }
   lines.forEach(function (L) {
     var ps = L.parts.slice().sort(function (a, b) { return a.x - b.x; });
-    L.str = ps.map(function (q) { return q.str; }).join('');
+    /* 「敷 地 面 積」のように字の間に空白が入る資料があるので、空白を除いて判定する */
+    var sq = function (t) { return String(t).replace(/[\s　]+/g, ''); };
+    L.str = ps.map(function (q) { return sq(q.str); }).join('');
     /* 項目の語が出てくる断片より左（隣のアピール文などがつながった部分）は欄に含めない */
     var m = INFO_LINE.exec(L.str);
     if (m) {
       for (var pos = 0, pi = 0; pi < ps.length; pi++) {
-        pos += ps[pi].str.length;
+        pos += sq(ps[pi].str).length;
         if (pos > m.index) { L.ix0 = Math.max(L.x0, ps[pi].x); break; }
       }
     }
@@ -3216,8 +3238,9 @@ function findInfoBlocks(items, pageH) {
       return L.y0 - b.y1 <= Math.min(lh, b.lh) * 1.2 && Math.min(b.x1, L.x1) - Math.max(b.ox0, L.x0) > 0;
     })[0];
     var ix0 = L.ix0 != null ? L.ix0 : L.x0;
-    if (!b) { b = { x0: ix0, x1: L.x1, ox0: L.x0, y0: L.y0, y1: L.y1, n: 0, head: 0, lh: lh }; blocks.push(b); }
-    if (INFO_HEAD.test(L.str)) b.head++;
+    if (!b) { b = { x0: ix0, x1: L.x1, ox0: L.x0, y0: L.y0, y1: L.y1, n: 0, head: 0, lh: lh, xs0: [], xs1: [] }; blocks.push(b); }
+    b.xs0.push(ix0); b.xs1.push(L.x1);
+    if (infoHead(L.str)) b.head++;
     b.x0 = Math.min(b.x0, ix0); b.x1 = Math.max(b.x1, L.x1); b.ox0 = Math.min(b.ox0, L.x0);
     b.y0 = Math.min(b.y0, L.y0); b.y1 = Math.max(b.y1, L.y1); b.n++; b.lh = Math.min(b.lh, lh);
   });
@@ -3230,10 +3253,20 @@ function findInfoBlocks(items, pageH) {
       if (ov >= Math.max(a.y1 - a.y0, c.y1 - c.y0) * 0.5 && (!pageH || Math.max(a.y1, c.y1) <= pageH * 0.25)) {
         a.x0 = Math.min(a.x0, c.x0); a.x1 = Math.max(a.x1, c.x1);
         a.y0 = Math.min(a.y0, c.y0); a.y1 = Math.max(a.y1, c.y1); a.n += c.n; a.head += c.head;
+        a.xs0 = a.xs0.concat(c.xs0); a.xs1 = a.xs1.concat(c.xs1);
         blocks.splice(j, 1); merged = true;
       }
     }
   }
+  /* 欄の左端は、行の左端の並びの2割目の位置（文字認識で写真の読み違いとつながった横に長い行に引っ張られないよう） */
+  var pct = function (arr, q) { var a = arr.slice().sort(function (u, v) { return u - v; }); return a[Math.min(a.length - 1, Math.floor((a.length - 1) * q + 0.5))]; };
+  blocks.forEach(function (b) {
+    if (b.n < 5) return;
+    var x0 = pct(b.xs0, 0.2), tol = (b.x1 - b.x0) * 0.05, x1 = x0;
+    /* 右端は、その左端の近くから始まる行（欄の中の行）のうち最も右 */
+    b.xs0.forEach(function (v, i) { if (v >= x0 - tol && b.xs1[i] > x1) x1 = b.xs1[i]; });
+    b.x0 = x0; b.x1 = x1;
+  });
   /* 物件概要の欄＝見出しで始まる行が3行以上。ページ上部（上から25%まで）の見出し欄（物件名・価格・交通）は4行以上 */
   return blocks.filter(function (b) { return b.n >= 4 && (b.head >= 3 || (pageH && b.y1 <= pageH * 0.25)); });
 }
@@ -3247,6 +3280,7 @@ function refineCropByText(canvas, items, crop) {
     var m = 6;
     return { x0: Math.max(0, b.x0 - m), y0: Math.max(0, b.y0 - m), x1: Math.min(W, b.x1 + m), y1: Math.min(H, b.y1 + m) };
   }).filter(function (b) { return b.y0 < H; });
+  if (window.__RE_DEBUG) console.log('BLK', JSON.stringify(blocks.map(function (b) { return [b.x0 / W, b.y0 / H, b.x1 / W, b.y1 / H].map(function (v) { return +v.toFixed(3); }); })), items.length);
   if (!blocks.length) return crop;
   var cur = { x0: 0, y0: 0, x1: W, y1: H };
   var cm = crop && /;([\d.]+),([\d.]+),([\d.]+),([\d.]+)/.exec(crop);
@@ -3287,10 +3321,34 @@ function refineCropByText(canvas, items, crop) {
         var px = e[0] + (e[2] - e[0]) * t / len, py = e[1] + (e[3] - e[1]) * t / len;
         c++; if (busy(px + e[4] * o, py + e[5] * o) && busy(px - e[4] * o, py - e[5] * o)) h++;
       }
-      if (c && h / c > hit) hit = h / c;
+      /* 上下の辺は、細かい字の欄や色地の帯に沿うことが多いので甘めに見る（8割を超えたら横切り） */
+      var rate = c ? h / c * (e[1] === e[3] ? 0.625 : 1) : 0;
+      if (rate > hit) hit = rate;
     });
     return hit;
   };
+  /* 右側の表の左（左側の表の右）に、「建物」「土地」など縦書きの区分の列があり、外枠の縦線で囲まれていることがある。
+     欄の端から3.5%以内に、欄の高さの6割以上続く縦線があれば、その線までを欄に含める */
+  /* 細い線は縮小すると薄れるので、元の大きさの画像で1画素ずつ見る */
+  var fctx = canvas.getContext('2d', { willReadFrequently: true });
+  var vline = function (x, y0, y1) {
+    x = Math.round(x); y0 = Math.max(0, Math.round(y0)); y1 = Math.min(H - 1, Math.round(y1));
+    if (y1 - y0 < 4 || x < 0 || x >= W) return false;
+    var col = fctx.getImageData(x, y0, 1, y1 - y0 + 1).data, n = 0, t = 0;
+    for (var q = 0; q < col.length; q += 4) { t++; if (0.299 * col[q] + 0.587 * col[q + 1] + 0.114 * col[q + 2] < 170) n++; }
+    return t && n / t >= 0.6;
+  };
+  blocks.forEach(function (b) {
+    /* 区分の列は内側と外側の2本の線で囲まれるので、範囲内で最も外側の線まで */
+    var lim = W * 0.035, st2 = 1, x, far = null;
+    if (b.x1 > W * 0.85) {
+      for (x = b.x0 - st2; x > b.x0 - lim && x > 0; x -= st2) if (vline(x, b.y0, b.y1)) far = x;
+      if (far != null) b.x0 = Math.max(0, far - 3);
+    } else if (b.x0 < W * 0.15) {
+      for (x = b.x1 + st2; x < b.x1 + lim && x < W; x += st2) if (vline(x, b.y0, b.y1)) far = x;
+      if (far != null) b.x1 = Math.min(W, far + 3);
+    }
+  });
   /* 今の範囲（罫線の表を外した範囲など）の中で探す */
   /* 今の範囲の辺が写真を横切っている（罫線の表を見誤った）ときは、資料全体から探す */
   var full = { x0: 0, y0: 0, x1: W, y1: H }, cur0 = cur;
@@ -3298,6 +3356,11 @@ function refineCropByText(canvas, items, crop) {
   /* 左右の辺だけを見る（上下の辺は見出しの帯などに沿うことが多い） */
   if (cuts({ x0: cur0.x0, y0: 0, x1: cur0.x1, y1: H }) > 0.6) cur0 = full;
   cur = cur0;
+  /* 罫線の表として外した側に、物件概要の欄が1つも無ければ、その判断は誤り（写真の枠などを表と見誤った）。
+     外した側を戻して、資料の端から探す */
+  var midX = function (b) { return (b.x0 + b.x1) / 2; };
+  if (cur.x0 > W * 0.05 && !blocks.some(function (b) { return midX(b) < cur.x0; })) cur = { x0: 0, y0: cur.y0, x1: cur.x1, y1: cur.y1 };
+  if (cur.x1 < W * 0.95 && !blocks.some(function (b) { return midX(b) > cur.x1; })) cur = { x0: cur.x0, y0: cur.y0, x1: W, y1: cur.y1 };
   var xs = [cur.x0, cur.x1], ys = [cur.y0, cur.y1];
   blocks.forEach(function (b) {
     [b.x0, b.x1].forEach(function (v) { if (v > cur.x0 && v < cur.x1) xs.push(v); });
@@ -3362,7 +3425,18 @@ function findVisualCrop(src) {
     return gs.filter(function (g) { return g.ys.length >= 6; });
   };
   var right = group(runs.filter(function (r) { return r.x0 > W * 0.35 && r.x1 > W * 0.8; }), 'x1');
-  var left = group(runs.filter(function (r) { return r.x0 < W * 0.2 && r.x1 < W * 0.65 && r.x1 > W * 0.2; }), 'x0');
+  /* 左側の表は、細い線（線の少し上と下は白い）だけを数える。左端に写真が並ぶ資料では、
+     写真の中の暗い横筋を表の罫線と見誤り、写真を切り落としていた */
+  var thin = function (r) {
+    var ok = 0, n = 0;
+    for (var xx = r.x0; xx <= r.x1; xx += 4) {
+      n++;
+      var a = (Math.max(0, r.y - 3) * W + xx) * 4, b = (Math.min(H - 1, r.y + 3) * W + xx) * 4;
+      if (0.299 * d[a] + 0.587 * d[a + 1] + 0.114 * d[a + 2] >= 200 || 0.299 * d[b] + 0.587 * d[b + 1] + 0.114 * d[b + 2] >= 200) ok++;
+    }
+    return n && ok / n >= 0.7;
+  };
+  var left = group(runs.filter(function (r) { return r.x0 < W * 0.2 && r.x1 < W * 0.65 && r.x1 > W * 0.2 && thin(r); }), 'x0');
   var vx0, vx1, sepMode = false;
   /* 表の端＝表の横罫線が最も多く始まる位置。間取り図の壁が表の罫線とつながって
      少数の長い線になることがあるが、表の罫線の本数にはかなわない */
@@ -3432,6 +3506,46 @@ function findVisualCrop(src) {
     if (sep == null) return null;
     vx0 = 0; vx1 = sep - 3; sepMode = true;
   }
+  /* 表の端のすぐ外に、色の付いた見出しの列（「所在」「権利」や縦書きの「土地」「建物」の色地の欄）が
+     続いていることがある。色地の列が途切れて紙の地の色になる所まで、表として外す。
+     途中に写真などが混ざる（色地が続かない）ときや、表の幅の目安（12%）を超えるときは広げない */
+  (function () {
+    var hist = {}, bk = null, bn = 0;
+    for (var q = 0; q < d.length; q += 12) {
+      var key = (d[q] >> 4) + ',' + (d[q + 1] >> 4) + ',' + (d[q + 2] >> 4);
+      hist[key] = (hist[key] || 0) + 1;
+      if (hist[key] > bn) { bn = hist[key]; bk = key; }
+    }
+    var bg = bk.split(',').map(function (v) { return v * 16 + 8; });
+    var gs = right.length && vx0 === 0 ? right : left;
+    var ys = []; gs.forEach(function (g) { g.rs.forEach(function (r) { ys.push(r.y); }); });
+    if (!ys.length) return;
+    var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    if (y1 - y0 < H * 0.2) return;
+    var frac = function (x) {
+      var n = 0, t = 0;
+      for (var yy = y0; yy <= y1; yy += 2) {
+        var k = (yy * W + x) * 4; t++;
+        if (Math.max(Math.abs(d[k] - bg[0]), Math.abs(d[k + 1] - bg[1]), Math.abs(d[k + 2] - bg[2])) > 28) n++;
+      }
+      return t ? n / t : 0;
+    };
+    var step = vx0 === 0 ? -1 : 1, start = vx0 === 0 ? vx1 + 3 : vx0 - 3, lim = Math.round(W * 0.12);
+    /* 表の端の数画素の中に色地の列があるか */
+    for (var s0 = 0; s0 < 8 && frac(start) < 0.6; s0++) start += step;
+    if (frac(start) < 0.6) return;
+    /* 色地の欄の間の細い白線（2画素まで）は飛ばし、3画素以上続く地の色の所を表の外とする */
+    for (var x = start, k2 = 0, gap = 0; k2 < lim && x > 2 && x < W - 3; x += step, k2++) {
+      var f = frac(x);
+      if (f >= 0.6) { gap = 0; continue; }
+      if (f < 0.15) {
+        if (++gap < 3) continue;
+        var edge = x - step * 2;
+        if (vx0 === 0) { if (edge - 1 < vx1) vx1 = edge - 1; } else if (edge + 1 > vx0) vx0 = edge + 1;
+      }
+      return;
+    }
+  })();
   if (vx1 - vx0 < W * 0.3) return null;
   /* 上端：範囲の幅の8割以上にわたる罫線のうち、上から30%までにある最も下のもの */
   var top = 0;

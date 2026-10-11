@@ -284,6 +284,20 @@ ok('「2SLDK+SIC」を付き部屋まで読む', acc.l2 === '2SLDK+SIC', acc.l2)
 ok('路線の前の「▶」は付けない', acc.line === '阪神本線', acc.line);
 ok('値がラベルの前に来る資料でも、専有面積にバルコニー面積を入れない', acc.own === 73.05, String(acc.own));
 
+/* 表の左に色地の見出しの列（「所在」「権利」、縦書きの「土地」「建物」）が付いた物件概要の表 */
+const lc = await p.evaluate(() => {
+  const c = document.createElement('canvas'); c.width = 1200; c.height = 850;
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 1200, 850);
+  x.fillStyle = '#000'; x.fillRect(0, 0, 1200, 3); x.fillRect(0, 140, 1200, 3);   /* 見出し欄 */
+  x.fillStyle = '#7a9'; x.fillRect(30, 170, 560, 300);                            /* 写真 */
+  x.fillStyle = '#2a7fc0'; x.fillRect(880, 160, 40, 660);                          /* 縦書きの見出しの列 */
+  for (let i = 0; i < 26; i++) { x.fillStyle = '#2a7fc0'; x.fillRect(924, 160 + i * 25, 60, 22); }  /* 見出しの欄（間に白い線） */
+  x.fillStyle = '#000'; for (let i = 0; i < 27; i++) x.fillRect(966, 160 + i * 25, 230, 2);         /* 値の欄の罫線 */
+  return window.__RE.findVisualCrop(c);
+});
+{ const m = String(lc).match(/;([0-9.]+),([0-9.]+),([0-9.]+),([0-9.]+)/);
+  ok('表の左の色地の見出しの列も外す', m && Number(m[3]) < 880 / 1200 && Number(m[3]) > 820 / 1200, String(lc)); }
+
 /* 罫線の無い「物件概要」の欄（左に文字だけが並ぶ様式）を、文字の位置から外す */
 const tb = await p.evaluate(() => {
   const W = 1200, H = 850;
