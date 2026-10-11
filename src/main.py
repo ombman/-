@@ -127,6 +127,9 @@ def _announce_published(files, published: str) -> None:
         f"図面 {len(files)} 件を読み取り、「すべてユーザー画面に掲載」を押しました。\n{names}\n\n"
         f"【結果】\n{published}\n\n"
         + ("※掲載されずに残った物件は、Chromeの画面で足りない項目を入力して掲載してください。\n\n" if held else "")
+        + ("※「Unable to handle the request」はWixのサイト側（データベースやバックエンドの設定）のエラーです。\n"
+           "　アプリの読み取りは正常です。サイトの設定を確認してください。\n\n"
+           if "Unable to handle the request" in published else "")
         + "確認が終わったら Chrome を閉じてください（アプリも終了します）。",
     )
 
