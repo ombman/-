@@ -19,6 +19,7 @@ REINSから保存した図面PDFを、物件紹介サイト（Wix）の管理画
 from __future__ import annotations
 
 import time
+from urllib.parse import urlsplit
 from pathlib import Path
 
 from app_logger import dump_html, get_logger, screenshot
@@ -85,6 +86,60 @@ def _login(frame, password: str, timeout_ms: int) -> None:
     )
 
 
+def _open_site(context, site_url: str, timeout_ms: int):
+    """
+    掲載サイトを開きます。「リダイレクトが多すぎます」（同じページへの転送の繰り返し）は、
+    このアプリ用Chromeに残った古いCookieが原因のことがあるため、そのサイトのCookieを消して1回だけ開き直します。
+    """
+    log = get_logger()
+    page = context.new_page()
+    page.bring_to_front()
+    try:
+        page.goto(site_url, wait_until="domcontentloaded", timeout=timeout_ms)
+        return page
+    except Exception as exc:
+        if "ERR_TOO_MANY_REDIRECTS" not in str(exc):
+            raise WixUploadError(f"掲載サイトを開けませんでした（{site_url}）。\nURLとインターネット接続を確認してください。\n詳細: {exc}") from exc
+        log.warning("掲載サイトで転送が繰り返されました。サイトのCookieを消して開き直します。")
+
+    # このURLに送られるCookie（www付き・無しの両方）だけを1つずつ消す
+    host = urlsplit(site_url).hostname or ""
+    base = host[4:] if host.startswith("www.") else host
+    urls = {site_url}
+    if base and not base.replace(".", "").isdigit():   # IPアドレスでなければ www 付き・無しも対象
+        urls |= {f"https://{base}/", f"https://www.{base}/"}
+    try:
+        cookies = context.cookies(list(urls))
+    except Exception as exc:
+        log.debug("Cookieの取得に失敗（続行）: %s", exc)
+        cookies = []
+    removed = 0
+    for c in cookies:
+        try:
+            context.clear_cookies(name=c["name"], domain=c["domain"], path=c["path"])
+            removed += 1
+        except Exception as exc:
+            log.debug("Cookieの削除に失敗（続行）: %s", exc)
+    log.info("  掲載サイトのCookieを %d 個消しました。", removed)
+    # エラー画面のタブは読み込みが中断されやすいので閉じ、新しいタブで開き直す
+    try:
+        page.close()
+    except Exception:
+        pass
+    page = context.new_page()
+    page.bring_to_front()
+    try:
+        page.goto(site_url, wait_until="domcontentloaded", timeout=timeout_ms)
+        return page
+    except Exception as exc:
+        raise WixUploadError(
+            "掲載サイトのページが、転送の繰り返し（リダイレクトが多すぎます）で開けませんでした。\n"
+            f"設定画面の「掲載サイトのURL」（{site_url}）を、ふだんのChromeで開けるか確認してください。\n"
+            "・Wixの「テストサイト」で作ったページは、公開サイトには存在しません。\n"
+            "　サイトを公開するか、URLの最後の「?rc=test-site」まで含めて設定してください。"
+        ) from exc
+
+
 def upload_to_wix(context, site_url: str, password: str, files: list[Path], timeout_ms: int = 60000):
     """
     files を掲載サイトのドロップ枠へ渡します。成功したらそのタブ（Page）を返します。
@@ -100,9 +155,7 @@ def upload_to_wix(context, site_url: str, password: str, files: list[Path], time
         raise WixUploadError("今回保存した図面のPDFが見つからないため、掲載サイトに渡せませんでした。")
 
     log.info("掲載サイトを開きます: %s", site_url)
-    page = context.new_page()
-    page.bring_to_front()
-    page.goto(site_url, wait_until="domcontentloaded", timeout=timeout_ms)
+    page = _open_site(context, site_url, timeout_ms)
     try:
         frame = find_widget_frame(page, timeout_ms)
         _login(frame, password, timeout_ms)
