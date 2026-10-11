@@ -1,4 +1,4 @@
 {
   "_readme": "配布元が用意したライセンス認証サーバー（Google Apps Script のウェブアプリ）のURL。tools/license_server/SETUP-ja.md の手順で作成したURLを server_url に入れて配布してください。",
-  "server_url": ""
+  "server_url": "https://script.google.com/macros/s/AKfycbzYkXKVBKpOmIeX0D2mbFlzHoi15xrIV7rh8FPFcc2WtJBB3h2FvbgI38VYZ7xYQ_p7/exec"
 }
