@@ -121,13 +121,14 @@ def _open_site(context, site_url: str, timeout_ms: int):
         except Exception as exc:
             log.debug("Cookieの削除に失敗（続行）: %s", exc)
     log.info("  掲載サイトのCookieを %d 個消しました。", removed)
-    # エラー画面のタブは読み込みが中断されやすいので閉じ、新しいタブで開き直す
+    # エラー画面のタブは読み込みが中断されやすいので、新しいタブで開き直す。
+    # 先に新しいタブを開いてから古いタブを閉じる（最後の1枚を閉じるとChromeごと終了するため）
+    old, page = page, context.new_page()
+    page.bring_to_front()
     try:
-        page.close()
+        old.close()
     except Exception:
         pass
-    page = context.new_page()
-    page.bring_to_front()
     try:
         page.goto(site_url, wait_until="domcontentloaded", timeout=timeout_ms)
         return page

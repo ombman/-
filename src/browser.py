@@ -60,6 +60,10 @@ def _allow_multiple_downloads(log) -> None:
         log.debug("複数ダウンロード許可の設定に失敗（続行）: %s", exc)
 
 
+# いま使っているブラウザセッション（掲載サイトへ渡す前にChromeが閉じていたとき、起動し直すため）
+CURRENT = None
+
+
 class BrowserSession:
     """
     with 文で使えるブラウザセッション。
@@ -82,6 +86,21 @@ class BrowserSession:
         _allow_multiple_downloads(log)
 
         self._pw = sync_playwright().start()
+        global CURRENT
+        CURRENT = self
+        return self._launch()
+
+    def relaunch(self):
+        """Chromeが閉じてしまったとき、同じ設定で起動し直して新しいタブ（Page）を返します。"""
+        try:
+            if self._context is not None:
+                self._context.close()
+        except Exception:
+            pass
+        return self._launch()
+
+    def _launch(self):
+        log = get_logger()
         channel = self.settings.get("browser_channel", "chrome")
         headless = bool(self.settings.get("headless", False))
         slow_mo = int(self.settings.get("slow_mo_ms", 300))

@@ -90,14 +90,19 @@ def _hand_over_to_wix(page, settings: dict, started: float, timeout_ms: int) -> 
         key=lambda f: f.name,
     )
     wix = credentials.load_credentials(WIX_CREDENTIAL_SERVICE)
+    args = (settings.get("wix_site_url", ""), wix.password if wix else "", files, max(timeout_ms, 60000))
     try:
-        upload_to_wix(
-            page.context,
-            settings.get("wix_site_url", ""),
-            wix.password if wix else "",
-            files,
-            max(timeout_ms, 60000),
-        )
+        try:
+            wix_page = upload_to_wix(page.context, *args)
+        except Exception as exc:
+            if "has been closed" not in str(exc):
+                raise
+            # REINSが画面を閉じた等でChromeが終了していた → Chromeを起動し直して渡す
+            log.warning("Chromeが閉じていたため、起動し直して掲載サイトに渡します。")
+            import browser
+
+            new_page = browser.CURRENT.relaunch()
+            wix_page = upload_to_wix(new_page.context, *args)
     except Exception as exc:
         log.error("掲載サイトへの受け渡しに失敗しました: %s\n%s", exc, traceback.format_exc())
         _show_error_dialog(
@@ -107,6 +112,12 @@ def _hand_over_to_wix(page, settings: dict, started: float, timeout_ms: int) -> 
         )
         return 4
 
+    _announce_handover(files)
+    _wait_until_browser_closed(wix_page)
+    return 0
+
+
+def _announce_handover(files) -> None:
     names = "\n".join("・" + f.name for f in files)
     _show_info_dialog(
         "掲載サイトに資料を渡しました",
@@ -116,8 +127,6 @@ def _hand_over_to_wix(page, settings: dict, started: float, timeout_ms: int) -> 
         "作業が終わったら Chrome を閉じてください（アプリも終了します）。\n"
         "※読み取り中に Chrome を閉じると、読み取りが止まります。",
     )
-    _wait_until_browser_closed(page)
-    return 0
 
 
 def _ensure_ready() -> dict:
