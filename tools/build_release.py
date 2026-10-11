@@ -25,7 +25,7 @@ ZIP_PATH = DIST / f"{TOP}.zip"
 FILES = [
     "install.bat", "setup.bat", "run.bat", "settings.bat", "update.bat",
     "requirements.txt",
-    "config/search_recipe.json", "config/settings.example.json",
+    "config/search_recipe.json", "config/settings.example.json", "config/license_server.json",
 ]
 
 

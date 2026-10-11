@@ -20,6 +20,7 @@ from tkinter import messagebox, ttk
 
 import config
 import credentials
+import license
 from wix_upload import WIX_CREDENTIAL_SERVICE, WIX_USERNAME
 
 
@@ -46,6 +47,18 @@ def open_settings(require_credentials: bool = False) -> bool:
 
     frm = ttk.Frame(root, padding=16)
     frm.pack(fill="both", expand=True)
+
+    # --- ライセンスキー（配布元から受け取ったキー） ---
+    lic_box = ttk.LabelFrame(frm, text="ライセンスキー（配布元から受け取ったキー）", padding=10)
+    lic_box.grid(row=0, column=0, columnspan=2, sticky="we", pady=(0, 12))
+    lic_var = tk.StringVar(value=license.load_key())
+    ttk.Entry(lic_box, textvariable=lic_var, width=30).grid(row=0, column=0, sticky="w")
+    ttk.Label(lic_box, text="例）RA-7K3P-9QXM-2D8F　※最初に使ったREINS IDに紐づきます",
+              foreground="#555").grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+    body = ttk.Frame(frm)
+    body.grid(row=1, column=0, columnspan=2, sticky="we")
+    outer, frm = frm, body
 
     # --- REINS ログインURL ---
     ttk.Label(frm, text="REINS ログインページのURL").grid(row=0, column=0, sticky="w", pady=(0, 2))
@@ -108,6 +121,10 @@ def open_settings(require_credentials: bool = False) -> bool:
 
     def on_save():
         url = url_var.get().strip()
+        lic_key = lic_var.get().strip()
+        if require_credentials and license.server_url() and not lic_key:
+            messagebox.showwarning("入力エラー", "ライセンスキーを入力してください。")
+            return
         user = id_var.get().strip()
         pw = pw_var.get()
 
@@ -138,6 +155,8 @@ def open_settings(require_credentials: bool = False) -> bool:
         settings["wix_upload_enabled"] = wix_on
         settings["wix_site_url"] = wix_url
         config.save_settings(settings)
+        if lic_key:
+            license.save_key(lic_key)
         if wix_pw:
             credentials.save_credentials(WIX_CREDENTIAL_SERVICE, WIX_USERNAME, wix_pw)
 
@@ -170,6 +189,7 @@ def open_settings(require_credentials: bool = False) -> bool:
     ttk.Button(btns, text="ログイン情報を削除", command=on_delete).pack(side="left", padx=4)
 
     frm.columnconfigure(0, weight=1)
+    outer.columnconfigure(0, weight=1)
     url_entry.focus_set()
     root.mainloop()
 

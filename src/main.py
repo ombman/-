@@ -27,6 +27,7 @@ import traceback
 import conditions
 import config
 import credentials
+import license
 from app_logger import get_logger
 from browser import DOWNLOAD_DIR, BrowserSession
 from reins_login import LOGIN_FAILED_MESSAGE, LoginError, login
@@ -128,7 +129,11 @@ def _ensure_ready() -> dict:
     settings = config.load_settings()
     service = settings.get("credential_service", "reins-auto-search")
 
-    need_settings = (not settings.get("login_url")) or (not credentials.has_credentials(service))
+    need_settings = (
+        (not settings.get("login_url"))
+        or (not credentials.has_credentials(service))
+        or (license.server_url() and not license.load_key())
+    )
 
     if need_settings:
         log.info("初回設定が必要です。設定画面を開きます。")
@@ -171,6 +176,23 @@ def main(argv: list[str]) -> int:
     if creds is None:
         _show_error_dialog("設定エラー", "ログイン情報が登録されていません。設定画面から登録してください。")
         return 1
+
+    # --- ライセンス認証（キー＋REINS IDの紐づけ） ---
+    # 配布元が認証サーバーのURLを設定するまでは確認しない（設定した時点から有効になる）
+    if not license.server_url():
+        log.warning("ライセンス認証サーバーが未設定のため、ライセンス確認を省略します。")
+        lic = license.LicenseResult(True, holder="（未設定）")
+    else:
+        lic = license.verify(license.server_url(), license.load_key(), creds.username)
+    if not lic.ok:
+        log.error("ライセンス認証に失敗しました: %s", lic.message)
+        _show_error_dialog(
+            "ライセンス認証",
+            lic.message + "\n\nライセンスキーは「settings」（設定画面）で入力・変更できます。",
+        )
+        return 5
+    log.info("ライセンス認証OK（利用者：%s%s）%s", lic.holder or "-",
+             f"／有効期限 {lic.expires}" if lic.expires else "", "［オフライン猶予］" if lic.offline else "")
 
     timeout_ms = int(settings.get("default_timeout_ms", 15000))
 

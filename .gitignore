@@ -12,3 +12,6 @@ config/settings.json
 # 検索条件（起動時の条件画面で保存）。更新で上書きされないよう共有しません。
 config/search_conditions.json
 
+
+# ライセンス認証の前回結果（オフライン時の猶予用）
+config/license_cache.json
