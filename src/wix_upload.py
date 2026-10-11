@@ -176,3 +176,54 @@ def upload_to_wix(context, site_url: str, password: str, files: list[Path], time
         screenshot(page, "ERROR_wix")
         dump_html(page, "ERROR_wix")
         raise
+
+
+def publish_all(page, timeout_ms: int = 60 * 60 * 1000) -> str:
+    """
+    読み取り（掲載用の資料画像の作成・文字認識）が全部終わるのを待ってから、
+    「すべてユーザー画面に掲載」を押し、結果の表示（◯件を掲載しました 等）を返します。
+    入力が足りない物件は掲載されずに残るので、人が画面で入力して掲載します。
+    """
+    log = get_logger()
+    frame = find_widget_frame(page, 60000)
+    spin = frame.locator("#dropLog .spin")
+    deadline = time.time() + timeout_ms / 1000
+    quiet_since, last_note = None, 0.0
+
+    # 1) 読み取り中の印（くるくる）が 5 秒続けて無くなるまで待つ
+    log.info("掲載サイトの読み取りが終わるのを待ちます（ページ数が多いと数分〜数十分かかります）。")
+    while True:
+        if time.time() > deadline:
+            raise WixUploadError("掲載サイトの読み取りが時間内に終わりませんでした。画面で状況を確認してください。")
+        busy = spin.count() > 0
+        if busy:
+            quiet_since = None
+            if time.time() - last_note > 30:
+                try:
+                    log.info("  読み取り中… %s", frame.locator("#dropLog").inner_text(timeout=2000).splitlines()[-1][:80])
+                except Exception:
+                    pass
+                last_note = time.time()
+        else:
+            quiet_since = quiet_since or time.time()
+            if time.time() - quiet_since >= 5:
+                break
+        page.wait_for_timeout(1000)
+
+    bar = frame.locator("#bulkBar")
+    if not bar.is_visible():
+        raise WixUploadError("読み取った物件がありませんでした（掲載するものがありません）。")
+    count = frame.locator("#bulkCount").inner_text().strip()
+    log.info("読み取りが終わりました（%s 件）。「すべてユーザー画面に掲載」を押します。", count)
+    screenshot(page, "wix_before_publish")
+
+    # 2) 「すべてユーザー画面に掲載」を押し、結果が出るまで待つ
+    frame.locator("#btnPublishAll").click(timeout=60000)
+    # 全件掲載できると結果欄ごと非表示になるので「表示されたか」ではなく「書き込まれたか」で待つ
+    result = frame.locator("#bulkLog .ok")
+    result.wait_for(state="attached", timeout=max(60000, int(deadline - time.time()) * 1000))
+    text = (frame.locator("#bulkLog").text_content() or "").strip()
+    text = text.replace("✖", "\n✖").replace("掲載しなかった資料", "\n掲載しなかった資料").strip()
+    log.info("掲載の結果: %s", text.replace("\n", " / "))
+    screenshot(page, "wix_after_publish")
+    return text

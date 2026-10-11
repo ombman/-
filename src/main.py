@@ -32,7 +32,7 @@ from app_logger import get_logger
 from browser import DOWNLOAD_DIR, BrowserSession
 from reins_login import LOGIN_FAILED_MESSAGE, LoginError, login
 from reins_search import StepError, run_recipe
-from wix_upload import WIX_CREDENTIAL_SERVICE, upload_to_wix
+from wix_upload import WIX_CREDENTIAL_SERVICE, publish_all, upload_to_wix
 
 
 def _show_error_dialog(title: str, message: str) -> None:
@@ -103,6 +103,8 @@ def _hand_over_to_wix(page, settings: dict, started: float, timeout_ms: int) -> 
 
             new_page = browser.CURRENT.relaunch()
             wix_page = upload_to_wix(new_page.context, *args)
+        # 読み取りが終わるのを待って「すべてユーザー画面に掲載」を押す
+        published = publish_all(wix_page)
     except Exception as exc:
         log.error("掲載サイトへの受け渡しに失敗しました: %s\n%s", exc, traceback.format_exc())
         _show_error_dialog(
@@ -112,20 +114,20 @@ def _hand_over_to_wix(page, settings: dict, started: float, timeout_ms: int) -> 
         )
         return 4
 
-    _announce_handover(files)
+    _announce_published(files, published)
     _wait_until_browser_closed(wix_page)
     return 0
 
 
-def _announce_handover(files) -> None:
+def _announce_published(files, published: str) -> None:
     names = "\n".join("・" + f.name for f in files)
+    held = "掲載しなかった" in published or "✖" in published
     _show_info_dialog(
-        "掲載サイトに資料を渡しました",
-        f"図面 {len(files)} 件を掲載サイトの管理画面に渡しました。\n{names}\n\n"
-        "Chromeの画面で読み取りが終わるのを待ち、内容を確認して\n"
-        "「ユーザー画面に掲載」を押してください。\n\n"
-        "作業が終わったら Chrome を閉じてください（アプリも終了します）。\n"
-        "※読み取り中に Chrome を閉じると、読み取りが止まります。",
+        "掲載サイトに掲載しました",
+        f"図面 {len(files)} 件を読み取り、「すべてユーザー画面に掲載」を押しました。\n{names}\n\n"
+        f"【結果】\n{published}\n\n"
+        + ("※掲載されずに残った物件は、Chromeの画面で足りない項目を入力して掲載してください。\n\n" if held else "")
+        + "確認が終わったら Chrome を閉じてください（アプリも終了します）。",
     )
 
 
