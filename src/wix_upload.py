@@ -6,7 +6,8 @@ REINSから保存した図面PDFを、物件紹介サイト（Wix）の管理画
 
 流れ:
     1) 同じChromeで新しいタブを開き、設定の「掲載サイトのURL」を表示する
-    2) サイト内の物件紹介枠（Wixの「HTMLコード」= iframe）を探す
+    2) サイト内の物件紹介枠（Wixの「HTMLコード」= iframe）を探し、
+       その版が最新か確かめる（古い版のまま公開されていれば中止）
     3) 「管理者ログイン」→ 管理用パスワードを入力 → ログイン
     4) ドラッグ＆ドロップ枠の受け口（ファイル選択欄）にPDFを渡す
        ※ドラッグ＆ドロップと同じ処理（読み取り・情報元の削除）が始まります
@@ -18,7 +19,9 @@ REINSから保存した図面PDFを、物件紹介サイト（Wix）の管理画
 
 from __future__ import annotations
 
+import re
 import time
+import urllib.request
 from urllib.parse import urlsplit
 from pathlib import Path
 
@@ -29,8 +32,60 @@ WIX_CREDENTIAL_SERVICE = "reins-auto-search-wix"
 WIX_USERNAME = "admin"
 
 
+# 掲載ページ（Wixに貼るHTML）の最新版。ここに書かれた版と、掲載サイトで動いている版を比べる
+LATEST_WIDGET_URL = (
+    "https://raw.githubusercontent.com/ombman/-/refs/heads/"
+    "claude/wix-real-estate-landing-page-oxzkoh/wix-embed/paste-into-wix.html"
+)
+
+
 class WixUploadError(Exception):
     """Wixへの受け渡しに失敗したことを表す例外。"""
+
+
+def _latest_widget_version(timeout_s: float = 15) -> str | None:
+    """最新版のHTMLの版（例 2026-10-12.1）を返します。取得できなければ None。"""
+    try:
+        req = urllib.request.Request(LATEST_WIDGET_URL, headers={"Cache-Control": "no-cache"})
+        with urllib.request.urlopen(req, timeout=timeout_s) as res:
+            text = res.read().decode("utf-8", "replace")
+    except Exception as exc:
+        get_logger().debug("最新版の確認に失敗: %s", exc)
+        return None
+    m = re.search(r'WIDGET_VERSION:\s*["\']([0-9.\-]+)["\']', text)
+    return m.group(1) if m else None
+
+
+def check_widget_version(frame) -> None:
+    """
+    掲載サイトで動いているHTMLが最新版かを確かめ、古ければ資料を渡す前に止めます。
+    古い版のまま渡すと、マイソク（不動産マイソク資料フォーマット）への転記や
+    物件概要欄の削除など、改善した処理が使われずに掲載されてしまうためです。
+    """
+    log = get_logger()
+    try:
+        current = frame.evaluate("() => document.documentElement.getAttribute('data-widget-version')")
+    except Exception:
+        current = None
+    latest = _latest_widget_version()
+    log.info("掲載ページの版: %s（最新: %s）", current or "不明（古い版）", latest or "確認できず")
+    howto = (
+        "Wixエディタで物件紹介ページのHTMLボックスを開き、「コードを入力」の中身を\n"
+        f"最新の内容（{LATEST_WIDGET_URL}）に貼り替えて「適用」→ 右上の「公開」を押してから、\n"
+        "もう一度このアプリを実行してください。"
+    )
+    if not current:
+        raise WixUploadError(
+            "掲載サイトのHTMLが古い版のまま公開されています（版の表示がありません）。\n"
+            "このまま資料を渡すと、マイソクへの転記などが使われずに掲載されるため、中止しました。\n" + howto
+        )
+    if latest and current < latest:
+        raise WixUploadError(
+            f"掲載サイトのHTMLが古い版です（公開中: {current}／最新: {latest}）。\n"
+            "このまま資料を渡すと、改善した処理が使われずに掲載されるため、中止しました。\n" + howto
+        )
+    if not latest:
+        log.warning("最新版を確認できませんでした（インターネット接続を確認してください）。公開中の版 %s のまま続けます。", current)
 
 
 def find_widget_frame(page, timeout_ms: int):
@@ -176,6 +231,7 @@ def upload_to_wix(context, site_url: str, password: str, files: list[Path], time
     page = _open_site(context, site_url, timeout_ms)
     try:
         frame = find_widget_frame(page, timeout_ms)
+        check_widget_version(frame)
         _login(frame, password, timeout_ms)
 
         _discard_leftovers(page, frame)
